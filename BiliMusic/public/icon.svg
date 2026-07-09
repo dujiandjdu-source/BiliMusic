@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="BiliMusic">
+  <rect width="256" height="256" rx="56" fill="#111827"/>
+  <path d="M72 74h112a28 28 0 0 1 28 28v60a28 28 0 0 1-28 28H72a28 28 0 0 1-28-28v-60a28 28 0 0 1 28-28Z" fill="#fb7185"/>
+  <path d="M82 50 108 76M174 50l-26 26" stroke="#f9fafb" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="100" cy="132" r="12" fill="#111827"/>
+  <circle cx="156" cy="132" r="12" fill="#111827"/>
+  <path d="M118 164h20" stroke="#111827" stroke-width="10" stroke-linecap="round"/>
+  <path d="M174 106v42a22 22 0 1 1-12-19V96l36-8v18l-24 5Z" fill="#f9fafb"/>
+</svg>
