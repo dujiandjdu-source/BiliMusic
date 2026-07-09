@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { SearchIcon, LocalMusicIcon, SettingsIcon } from "./Icons";
 
 interface TopBarProps {
@@ -12,7 +12,6 @@ interface TopBarProps {
 const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSettingsClick, appMode, onToggleMode }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [hover, setHover] = useState(false);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -27,18 +26,14 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
   };
 
   return (
-    <div
-      className="fixed top-0 left-0 right-0 h-10 z-[60] drag"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
+    <div className="fixed top-0 left-0 right-0 h-10 z-[60] drag bg-black/35 backdrop-blur-xl border-b border-white/5">
       {/* 左侧：Logo + 标题 */}
-      <div className={`absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-2 transition-opacity duration-300 ${hover ? "opacity-100" : "opacity-0"}`}>
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
         <span className="text-white/60 text-xs font-medium tracking-wide">BiliMusic</span>
       </div>
 
       {/* 右侧：功能按钮 + 窗口控制 */}
-      <div className={`absolute right-0 top-0 h-full flex items-center transition-opacity duration-300 ${hover ? "opacity-100" : "opacity-0"}`}>
+      <div className="absolute right-0 top-0 h-full flex items-center">
         <div className="flex items-center gap-0.5 pr-1 nodrag">
           <IconBtn onClick={() => fileInputRef.current?.click()} title="导入音乐">
             <LocalMusicIcon className="w-4 h-4" />

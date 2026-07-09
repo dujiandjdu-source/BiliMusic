@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, session } = require("electron");
+const { app, BrowserWindow, ipcMain, protocol, session, shell } = require("electron");
 const path = require("path");
 let mainWindow;
 
@@ -8,6 +8,15 @@ function shouldRelaxEmbeddingHeaders(url) {
   try {
     const { hostname } = new URL(url);
     return BILIBILI_HOST_RE.test(hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedExternalUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && BILIBILI_HOST_RE.test(parsed.hostname);
   } catch {
     return false;
   }
@@ -43,7 +52,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: "BiliMusic",
-    backgroundColor: "#000000",
+    backgroundColor: "#0b0c10",
     frame: false,
     titleBarStyle: "hidden",
     webPreferences: {
@@ -52,6 +61,26 @@ function createWindow() {
       nodeIntegration: false,
       webviewTag: true,
     },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) {
+      shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.javascript = true;
+    webPreferences.webSecurity = true;
+    webPreferences.allowRunningInsecureContent = false;
+    delete webPreferences.preload;
+
+    if (!isAllowedExternalUrl(params.src || "")) {
+      event.preventDefault();
+    }
   });
 
   // 窗口控制 IPC

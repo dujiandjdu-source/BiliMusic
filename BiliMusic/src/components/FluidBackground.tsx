@@ -181,32 +181,44 @@ const FluidBackground: React.FC<FluidBackgroundProps> = ({
   }, []);
 
   useEffect(() => {
-    const resize = () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+    let resizeRaf = 0;
 
-      if (canvas.dataset.offscreenTransferred === "true") {
+    const resize = () => {
+      if (resizeRaf) {
+        window.cancelAnimationFrame(resizeRaf);
+      }
+
+      resizeRaf = window.requestAnimationFrame(() => {
+        resizeRaf = 0;
+        const width = Math.max(1, window.innerWidth);
+        const height = Math.max(1, window.innerHeight);
+        const canvas = canvasRef.current;
+        if (!canvas || width <= 0 || height <= 0) return;
+
+        if (canvas.dataset.offscreenTransferred === "true") {
+          if (rendererRef.current instanceof WebWorkerBackgroundRender) {
+            rendererRef.current.resize(width, height);
+          }
+          return;
+        }
+
         if (rendererRef.current instanceof WebWorkerBackgroundRender) {
           rendererRef.current.resize(width, height);
+          return;
         }
-        return;
-      }
 
-      if (rendererRef.current instanceof WebWorkerBackgroundRender) {
-        rendererRef.current.resize(width, height);
-        return;
-      }
-
-      canvas.width = width;
-      canvas.height = height;
-      rendererRef.current?.resize(width, height);
+        rendererRef.current?.resize(width, height);
+      });
     };
 
     resize();
     window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      if (resizeRaf) {
+        window.cancelAnimationFrame(resizeRaf);
+      }
+    };
   }, [isMobileLayout, canvasInstanceKey]);
 
   useEffect(() => {
@@ -297,8 +309,8 @@ const FluidBackground: React.FC<FluidBackgroundProps> = ({
       <canvas
         ref={canvasRef}
         key={canvasKey}
-        className="fixed inset-0 w-full h-full bg-black block"
-        style={{ touchAction: "none" }}
+        className="fixed inset-0 w-full h-full block"
+        style={{ touchAction: "none", backgroundColor: "#0b0c10" }}
       />
       <div
         className="fixed inset-0 w-full h-full pointer-events-none opacity-[0.03] mix-blend-overlay"

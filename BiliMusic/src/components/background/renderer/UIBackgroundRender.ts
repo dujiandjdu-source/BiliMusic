@@ -50,6 +50,7 @@ export class UIBackgroundRender extends BaseBackgroundRender {
 
     this.running = true;
     this.resetClock(performance.now());
+    this.renderCallback(this.ctx, performance.now());
     this.rafId = window.requestAnimationFrame(this.tick);
   }
 
@@ -67,6 +68,9 @@ export class UIBackgroundRender extends BaseBackgroundRender {
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
+      if (this.ctx) {
+        this.renderCallback(this.ctx, performance.now());
+      }
     }
   }
 }

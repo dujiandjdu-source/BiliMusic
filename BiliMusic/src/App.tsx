@@ -11,6 +11,7 @@ import SearchModal from "./components/SearchModal";
 import PwaUpdatePrompt from "./components/PwaUpdatePrompt";
 import SettingsDialog from "./components/SettingsDialog";
 import BilibiliVideoDialog from "./components/BilibiliVideoDialog";
+import BilibiliWebView from "./components/BilibiliWebView";
 import { usePlaylist } from "./hooks/usePlaylist";
 import { usePlayer } from "./hooks/usePlayer";
 import { useI18n } from "./hooks/useI18n";
@@ -505,13 +506,7 @@ const App: React.FC = () => {
 
       {/* Main Content Split */}
       {appMode === "video" ? (
-        <div className="flex-1 w-full h-full min-h-0 pt-10">
-          <webview
-            src="https://www.bilibili.com/"
-            allowpopups
-            className="block w-full h-full border-0"
-          />
-        </div>
+        <BilibiliWebView />
       ) : isMobileLayout ? (
         <div className="flex-1 relative w-full h-full">
           <div
