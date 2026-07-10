@@ -202,8 +202,8 @@ const SearchModal: React.FC<SearchModalProps> = ({
   };
 
   const handleSelection = (index: number) => {
-    if (search.activeTab === "queue") {
-      const item = search.queueResults[index];
+    if (search.activeTab === "album") {
+      const item = search.albumResults[index];
       if (item) {
         onPlayQueueIndex(item.i);
         onClose();
@@ -356,26 +356,15 @@ const SearchModal: React.FC<SearchModalProps> = ({
               className="absolute top-1 bottom-1 rounded-[6px] bg-white/15 shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-all duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]"
               style={{
                 left:
-                  search.activeTab === "queue"
+                  search.activeTab === "netease"
                     ? "4px"
-                    : search.activeTab === "netease"
+                    : search.activeTab === "album"
                       ? "calc(33.333% + 4px)"
                       : "calc(66.666% + 4px)",
                 width: "calc(33.333% - 4px)",
               }}
             />
 
-            <button
-              onClick={() => {
-                search.setActiveTab("queue");
-              }}
-              className={`
-                        relative flex-1 py-1.5 text-[13px] font-medium transition-colors duration-200 z-10
-                        ${search.activeTab === "queue" ? "text-white" : "text-white/50 hover:text-white/70"}
-                    `}
-            >
-              {search.queueProvider.label}
-            </button>
             <button
               onClick={() => {
                 search.setActiveTab("netease");
@@ -389,6 +378,17 @@ const SearchModal: React.FC<SearchModalProps> = ({
             </button>
             <button
               onClick={() => {
+                search.setActiveTab("album");
+              }}
+              className={`
+                        relative flex-1 py-1.5 text-[13px] font-medium transition-colors duration-200 z-10
+                        ${search.activeTab === "album" ? "text-white" : "text-white/50 hover:text-white/70"}
+                    `}
+            >
+              专辑
+            </button>
+            <button
+              onClick={() => {
                 search.setActiveTab("bilibili");
               }}
               className={`
@@ -398,7 +398,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
             >
               B站
             </button>
-          </div>
+            </div>
 
           {/* Search Bar */}
           <div className="relative group mx-2">
@@ -423,7 +423,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                   ? dict.search.online
                   : search.activeTab === "bilibili"
                     ? "搜索B站视频..."
-                    : dict.search.queue
+                    : "搜索专辑..."
               }
               className="
                         w-full pl-12 pr-4 py-3.5
@@ -446,11 +446,11 @@ const SearchModal: React.FC<SearchModalProps> = ({
           onScroll={search.handleScroll}
         >
           {/* Queue Results */}
-          {search.activeTab === "queue" && (
+          {search.activeTab === "album" && (
             <div className="relative flex flex-col gap-1">
-              {search.queueResults.length === 0 ? (
+              {search.albumResults.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 text-white/20">
-                  <span className="text-lg">{dict.search.emptyQueue}</span>
+                  <span className="text-lg">{"没有匹配的专辑歌曲"}</span>
                 </div>
               ) : (
                 <>
@@ -466,7 +466,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                     />
                   )}
 
-                  {search.queueResults.map(({ s, i }, idx) => {
+                  {search.albumResults.map(({ s, i }, idx) => {
                     const nowPlaying = search.isNowPlaying(s);
                     return (
                       <div
@@ -476,7 +476,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                         }}
                         onClick={() => handleSelection(idx)}
                         onContextMenu={(e) =>
-                          search.openContextMenu(e, s, "queue")
+                          search.openContextMenu(e, s, "album")
                         }
                         className={`
                                         relative z-10 group flex items-center gap-3 p-3 rounded-[10px] cursor-pointer
@@ -932,7 +932,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (search.contextMenu!.type === "queue") {
+                  if (search.contextMenu!.type === "album") {
                     const qItem = search.contextMenu!.track as Song;
                     const idx = queue.findIndex((s) => s.id === qItem.id);
                     onPlayQueueIndex(idx);

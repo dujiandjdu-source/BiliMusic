@@ -13,7 +13,7 @@ import {
 import { BilibiliVideoInfo } from "../types";
 import { extractBvid } from "../services/bilibiliService";
 
-export type SearchSource = "queue" | "netease" | "bilibili";
+export type SearchSource = "netease" | "album" | "bilibili";
 export type SearchResultItem = Song | NeteaseTrackInfo | BilibiliVideoInfo;
 
 interface ContextMenuState {
@@ -39,7 +39,7 @@ export const useSearchModal = ({
 }: UseSearchModalParams) => {
   // Search query state
   const [query, setQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<SearchSource>("queue");
+  const [activeTab, setActiveTab] = useState<SearchSource>("netease");
 
   // Navigation State
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -54,7 +54,7 @@ export const useSearchModal = ({
   const bilibiliProvider = useBilibiliSearchProvider();
 
   // Queue search results (real-time)
-  const [queueResults, setQueueResults] = useState<{ s: Song; i: number }[]>(
+  const [albumResults, setQueueResults] = useState<{ s: Song; i: number }[]>(
     [],
   );
 
@@ -66,7 +66,7 @@ export const useSearchModal = ({
 
   // Update queue results in real-time
   useEffect(() => {
-    if (activeTab === "queue") {
+    if (activeTab === "album") {
       queueProvider.search(query).then((results) => {
         const mappedResults = (results as Song[]).map((s) => {
           const originalIndex = queue.findIndex((qs) => qs.id === s.id);
@@ -144,8 +144,8 @@ export const useSearchModal = ({
 
   const navigateDown = useCallback(() => {
     const listLength =
-      activeTab === "queue"
-        ? queueResults.length
+      activeTab === "album"
+        ? albumResults.length
         : activeTab === "netease"
           ? neteaseProvider.results.length
           : bilibiliProvider.results.length;
@@ -157,7 +157,7 @@ export const useSearchModal = ({
   }, [
     activeTab,
     selectedIndex,
-    queueResults.length,
+    albumResults.length,
     neteaseProvider.results.length,
     bilibiliProvider.results.length,
     scrollToItem,
@@ -171,9 +171,9 @@ export const useSearchModal = ({
 
   const switchTab = useCallback(() => {
     setActiveTab((prev) => {
-      if (prev === "queue") return "netease";
-      if (prev === "netease") return "bilibili";
-      return "queue";
+      if (prev === "netease") return "album";
+      if (prev === "album") return "bilibili";
+      return "netease";
     });
     setSelectedIndex(-1);
   }, []);
@@ -283,7 +283,7 @@ export const useSearchModal = ({
     bilibiliProvider,
 
     // Results
-    queueResults,
+    albumResults,
 
     // Refs
     itemRefs,

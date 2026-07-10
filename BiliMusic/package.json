@@ -17,6 +17,7 @@
     "@clamber_l/crypto": "^0.1.12",
     "@react-spring/web": "^10.0.3",
     "colorthief": "^3.3.1",
+    "electron-updater": "^6.8.9",
     "fast-xml-parser": "^5.9.3",
     "jsmediatags": "^3.9.7",
     "react": "^19.2.0",
@@ -46,12 +47,19 @@
       "package.json"
     ],
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "dujiandjdu-source",
+      "repo": "BiliMusic"
     }
   }
 }

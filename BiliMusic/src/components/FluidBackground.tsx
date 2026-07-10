@@ -306,11 +306,12 @@ const FluidBackground: React.FC<FluidBackgroundProps> = ({
 
   return (
     <>
+      <div className="fixed inset-0 w-full h-full" style={{ backgroundColor: "#0b0c10", zIndex: -1 }} />
       <canvas
         ref={canvasRef}
         key={canvasKey}
         className="fixed inset-0 w-full h-full block"
-        style={{ touchAction: "none", backgroundColor: "#0b0c10" }}
+        style={{ touchAction: "none", backgroundColor: "#0b0c10", willChange: "transform" }}
       />
       <div
         className="fixed inset-0 w-full h-full pointer-events-none opacity-[0.03] mix-blend-overlay"

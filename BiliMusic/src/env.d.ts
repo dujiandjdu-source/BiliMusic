@@ -85,6 +85,18 @@ interface Window {
       ) => Promise<{ url: string | null; code: number; message?: string; quality?: string }>;
       setMeta: (songId: string, title: string, artist: string) => Promise<boolean>;
     };
+    browser: {
+      show: () => Promise<void>;
+      hide: () => Promise<void>;
+      navigate: (url: string) => Promise<void>;
+      goBack: () => Promise<void>;
+      goForward: () => Promise<void>;
+      reload: () => Promise<void>;
+      goHome: () => Promise<void>;
+      getUrl: () => Promise<string>;
+      onUrlChanged: (cb: (url: string) => void) => () => void;
+      onNavState: (cb: (state: { canGoBack: boolean; canGoForward: boolean; isLoading: boolean }) => void) => () => void;
+    };
     setMode: (mode: "music" | "video") => Promise<void>;
   };
 }

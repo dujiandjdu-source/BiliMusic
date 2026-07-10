@@ -100,6 +100,7 @@ interface RowState {
     groupArtist?: string;
     groupCover?: string;
     groupChildCount?: number;
+    groupFirstSongIndex?: number;
 }
 
 type SourceFilter = "all" | "local" | "bilibili" | "remote" | "bili-multi";
@@ -235,16 +236,16 @@ const PlaylistPanel = React.memo(({
     }, [queue]);
 
     const visibleQueue = useMemo(() => {
-        const rows: Array<{ song?: Song; index: number; isGroupHeader?: boolean; isSeparator?: boolean; groupBvid?: string; groupTitle?: string; groupArtist?: string; groupCover?: string; groupChildCount?: number }> = [];
+        const rows: Array<{ song?: Song; index: number; isGroupHeader?: boolean; isSeparator?: boolean; groupBvid?: string; groupTitle?: string; groupArtist?: string; groupCover?: string; groupChildCount?: number; groupFirstSongIndex?: number }> = [];
 
         // ===== PASS 1: Multi-P groups (headers + expanded children) =====
         const addedGroups = new Set<string>();
-        const groupSongs: Song[] = [];  // children that belong to groups
+        const groupSongs: Array<{ song: Song; index: number }> = [];  // children that belong to groups
         const singleSongs: Array<{ song: Song; index: number }> = [];  // standalone songs
 
         queue.forEach((song, index) => {
             if (song.source === "bilibili" && song.bvid && multiPartGroups.has(song.bvid)) {
-                groupSongs.push(song);
+                groupSongs.push({ song, index });
             } else {
                 // Apply source filter to singles
                 if (sourceFilter === "all" || sourceFilter === song.source) {
@@ -260,7 +261,7 @@ const PlaylistPanel = React.memo(({
         // Process groups in order of first appearance
         const groupOrder: Array<{ bvid: string; group: typeof multiPartGroups extends Map<string, infer V> ? V : never }> = [];
         const seenOrder = new Set<string>();
-        groupSongs.forEach((song) => {
+        groupSongs.forEach(({ song }) => {
             if (!seenOrder.has(song.bvid!)) {
                 seenOrder.add(song.bvid!);
                 const group = multiPartGroups.get(song.bvid!)!;
@@ -278,19 +279,22 @@ const PlaylistPanel = React.memo(({
             if (sourceFilter !== "all" && sourceFilter !== "bilibili" && sourceFilter !== "bili-multi") return;
 
             // Group header
+            const _firstSongIdx = queue.findIndex((s) => s.id === group.songs[0]?.id);
             rows.push({
                 index: -1, isGroupHeader: true,
                 groupBvid: bvid, groupTitle: group.title,
                 groupArtist: group.artist, groupCover: group.coverUrl,
                 groupChildCount: group.songs.length,
+                groupFirstSongIndex: _firstSongIdx,
             });
 
             // Children (if expanded) + apply query filter
             if (!collapsedGroups.has(bvid)) {
                 group.songs.forEach((song) => {
-                    if (!normalizedQuery) { rows.push({ song, index: -1 }); return; }
+                    const realIdx = queue.findIndex((s) => s.id === song.id);
+                    if (!normalizedQuery) { rows.push({ song, index: realIdx }); return; }
                     if (`${song.title}\n${song.artist}`.toLocaleLowerCase().includes(normalizedQuery)) {
-                        rows.push({ song, index: -1 });
+                        rows.push({ song, index: realIdx });
                     }
                 });
             }
@@ -711,6 +715,7 @@ const PlaylistPanel = React.memo(({
                     groupArtist: row.groupArtist,
                     groupCover: row.groupCover,
                     groupChildCount: row.groupChildCount,
+                        groupFirstSongIndex: row.groupFirstSongIndex,
                 } : {}),
                 ...(row.isSeparator ? {
                     isSeparator: true,
@@ -909,16 +914,25 @@ const PlaylistPanel = React.memo(({
                                     </button>
                                 )}
                             </div>
-                            <select
-                                value={sortMode}
-                                onChange={(event) => setSortMode(event.target.value as SortMode)}
-                                className="h-9 rounded-xl border border-white/8 bg-black/35 px-2 text-xs text-white/65 outline-none"
-                                aria-label="排序方式"
-                            >
-                                <option value="queue">播放顺序</option>
-                                <option value="title">按歌曲名</option>
-                                <option value="artist">按歌手</option>
-                            </select>
+                            <div className="flex items-center gap-1">
+                            {([
+                                ["queue", "顺序"],
+                                ["title", "歌名"],
+                                ["artist", "歌手"],
+                            ] as Array<[SortMode, string]>).map(([value, label]) => (
+                                <button
+                                    key={value}
+                                    onClick={() => setSortMode(value)}
+                                    className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                                        sortMode === value
+                                            ? "bg-white/15 text-white"
+                                            : "text-white/40 hover:bg-white/5 hover:text-white/70"
+                                    }`}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
                         </div>
                         <div className="flex items-center gap-1.5">
                             {([
@@ -996,15 +1010,14 @@ const PlaylistPanel = React.memo(({
                                         return (
                                             <div
                                                 key={`group-${item.groupBvid}`}
-                                                className="group flex items-center gap-3 px-3 py-2 mx-1 my-0.5 cursor-pointer hover:bg-white/5 rounded-xl transition-colors border border-emerald-500/10 bg-emerald-500/[0.03]"
+                                                className="group flex items-center gap-3 px-3 py-2 mx-1 my-0.5 cursor-pointer hover:bg-white/5 rounded-xl transition-colors border border-emerald-500/10 bg-emerald-500/[0.03] active:scale-[0.98]"
                                                 style={{
                                                     height: "52px",
                                                     position: "absolute",
                                                     top: `${view * ITEM_HEIGHT}px`,
                                                     width: "calc(100% - 10px)",
                                                 }}
-                                                onClick={() => {
-                                                    setCollapsedGroups((prev) => {
+                                                onClick={() => { if (isEditing) { const childIds = queue.filter(s => s.bvid === item.groupBvid).map(s => s.id); const ns = new Set(selectedIds); const allSel = childIds.every(id => ns.has(id)); if (allSel) { childIds.forEach(id => ns.delete(id)); } else { childIds.forEach(id => ns.add(id)); } setSelectedIds(ns); return; } setCollapsedGroups((prev) => {
                                                         const next = new Set(prev);
                                                         const bvid = item.groupBvid!;
                                                         if (next.has(bvid)) next.delete(bvid);
@@ -1102,117 +1115,114 @@ const PlaylistPanel = React.memo(({
                                                 )}
                                             </div>
 
-                                            {/* Text */}
-                                             <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-                                                 <div className={`text-[15px] font-semibold truncate leading-tight transition-colors duration-300`}
-                                                     style={{ color: isCurrent ? accentColor : 'rgba(255,255,255,0.9)' }}>
-                                                     {song.title}
-                                                 </div>
-                                                 <div className="text-[13px] text-white/50 truncate font-medium">
-                                                     {song.artist}
-                                                 </div>
-                                             </div>
-
-                                              {!isEditing && (
-                                                  <div className="flex shrink-0 items-center gap-1 opacity-85 group-hover:opacity-100">
-                                                      <button
-                                                          type="button"
-                                                          title={isLiked ? "取消喜欢" : "喜欢"}
-                                                          onClick={(e) => {
-                                                              e.preventDefault();
+                                            {/* Text + Actions (hover toggles between layers) */}
+                                            <div className="flex-1 min-w-0 relative">
+                                                {/* Default: title + artist (fades out on hover) */}
+                                                <div className="group-hover:opacity-0 transition-opacity duration-150">
+                                                    <div className="flex flex-col justify-center gap-0.5">
+                                                        <div className={`text-[15px] font-semibold truncate leading-tight transition-colors duration-300`}
+                                                            style={{ color: isCurrent ? accentColor : 'rgba(255,255,255,0.9)' }}>
+                                                            {song.title}
+                                                        </div>
+                                                        <div className="text-[13px] text-white/50 truncate font-medium">
+                                                            {song.artist}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {/* Hover overlay: 收藏 - 品质 - 删除 - 拖拽 */}
+                                                {!isEditing && (
+                                                    <div className="absolute inset-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                                                        <button
+                                                            type="button"
+                                                            title={isFavorite ? "取消收藏" : "收藏"}
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                onToggleFavorite(song.id);
+                                                            }}
+                                                            className={`h-7 rounded-lg px-2 text-[11px] transition-colors ${
+                                                                isFavorite
+                                                                    ? "bg-amber-500/10 text-amber-200"
+                                                                    : "text-white/35 hover:bg-white/8 hover:text-amber-100"
+                                                            }`}
+                                                        >
+                                                            收藏
+                                                        </button>
+                                                        <select
+                                                            value={song.audioQuality || "auto"}
+                                                            title="歌曲品质"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            onPointerDown={(e) => e.stopPropagation()}
+                                                            onChange={(event) => {
+                                                                event.preventDefault();
+                                                                event.stopPropagation();
+                                                                onQualityChange(
+                                                                    song.id,
+                                                                    event.target.value as AudioQuality,
+                                                                );
+                                                            }}
+                                                            className="h-7 rounded-lg border border-white/8 bg-black/35 px-1.5 text-[11px] text-white/55 outline-none hover:text-white"
+                                                        >
+                                                            <option value="auto">自动</option>
+                                                            <option value="lossless">无损</option>
+                                                            <option value="high">高品</option>
+                                                            <option value="standard">标准</option>
+                                                        </select>
+                                                        <button
+                                                            type="button"
+                                                            title="删除"
+                                                            onClick={(e) => {
                                                               e.stopPropagation();
-                                                              onToggleLiked(song.id);
-                                                          }}
-                                                          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
-                                                              isLiked
-                                                                  ? "text-pink-300 bg-pink-500/10"
-                                                                  : "text-white/30 hover:bg-white/8 hover:text-pink-200"
-                                                          }`}
-                                                      >
-                                                          <LikeIcon className="h-4 w-4" filled={isLiked} />
-                                                      </button>
-                                                      <button
-                                                          type="button"
-                                                          title={isFavorite ? "取消收藏" : "收藏"}
-                                                          onClick={(e) => {
-                                                              e.preventDefault();
-                                                              e.stopPropagation();
-                                                              onToggleFavorite(song.id);
-                                                          }}
-                                                          className={`h-7 rounded-lg px-2 text-[11px] transition-colors ${
-                                                              isFavorite
-                                                                  ? "bg-amber-500/10 text-amber-200"
-                                                                  : "text-white/35 hover:bg-white/8 hover:text-amber-100"
-                                                          }`}
-                                                      >
-                                                          收藏
-                                                      </button>
-                                                      <select
-                                                          value={song.audioQuality || "auto"}
-                                                          title="歌曲品质"
-                                                          onClick={(e) => e.stopPropagation()}
-                                                          onPointerDown={(e) => e.stopPropagation()}
-                                                          onChange={(event) => {
-                                                              event.preventDefault();
-                                                              event.stopPropagation();
-                                                              onQualityChange(
-                                                                  song.id,
-                                                                  event.target.value as AudioQuality,
-                                                              );
-                                                          }}
-                                                          className="h-7 rounded-lg border border-white/8 bg-black/35 px-1.5 text-[11px] text-white/55 outline-none hover:text-white"
-                                                      >
-                                                          <option value="auto">自动</option>
-                                                          <option value="lossless">无损</option>
-                                                          <option value="high">高品</option>
-                                                          <option value="standard">标准</option>
-                                                      </select>
-                                                  </div>
-                                              )}
+                                                              onRemove([song.id]);
+                                                            }}
+                                                            className="shrink-0 flex h-7 w-7 items-center justify-center rounded-full text-white/30 hover:text-red-300 hover:bg-white/5 transition-all duration-200"
+                                                        >
+                                                          <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M4.5 3V2.5a.5.5 0 01.5-.5h2a.5.5 0 01.5.5V3M5 5.5v3M7 5.5v3M2.5 3l.7 6.3a.5.5 0 00.5.45h4.6a.5.5 0 00.5-.45L9.5 3" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                                        </button>
 
-                                              {/* Quick delete button - appears on hover */}
-                                              <button
-                                                  type="button"
-                                                  title="删除"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onRemove([song.id]);
-                                                  }}
-                                                  className="shrink-0 w-0 opacity-0 pointer-events-none group-hover:w-6 group-hover:opacity-60 group-hover:pointer-events-auto hover:!opacity-100 hover:text-red-300 flex items-center justify-center rounded-full text-white/40 transition-all duration-200 overflow-hidden"
-                                              >
-                                                <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M4.5 3V2.5a.5.5 0 01.5-.5h2a.5.5 0 01.5.5V3M5 5.5v3M7 5.5v3M2.5 3l.7 6.3a.5.5 0 00.5.45h4.6a.5.5 0 00.5-.45L9.5 3" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                                              </button>
-                                              <span className="shrink-0 rounded-full bg-white/5 px-2 py-1 text-[10px] text-white/35">
-                                                  {song.source === "local"
-                                                      ? "本地"
-                                                      : song.source === "bilibili"
-                                                        ? "B站"
-                                                        : "在线"}
-                                              </span>
-
-                                              {!isEditing && !smartViewActive && (
-                                                  <button
-                                                      type="button"
-                                                      title={dict.list.drag}
-                                                      aria-label={dict.list.reorder(song.title)}
-                                                      onPointerDown={(e) => {
-                                                          e.preventDefault();
-                                                          e.stopPropagation();
-                                                         handlePress(e, song, index, true);
-                                                     }}
-                                                     onClick={(e) => {
-                                                         e.preventDefault();
-                                                         e.stopPropagation();
-                                                     }}
-                                                     className={`
-                                                         relative flex h-8 shrink-0 items-center justify-center overflow-hidden rounded-xl text-white/35 transition-all duration-200
-                                                         ${isDrag ? 'w-8 opacity-100' : 'w-0 opacity-0 pointer-events-none group-hover:w-8 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:w-8 group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:bg-white/10 hover:text-white/80'}
-                                                     `}
-                                                     style={{ cursor: isDrag ? 'grabbing' : 'grab' }}
-                                                 >
-                                                     <GripIcon className="w-4 h-4" />
-                                                 </button>
-                                             )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {/* Like button - always visible, outside hover container */}
+                                            {!isEditing && (
+                                                <button
+                                                    type="button"
+                                                    title={isLiked ? "取消喜欢" : "喜欢"}
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        onToggleLiked(song.id);
+                                                    }}
+                                                    className={`shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+                                                        isLiked
+                                                            ? "text-pink-300 bg-pink-500/10"
+                                                            : "text-white/30 hover:bg-white/8 hover:text-pink-200"
+                                                    }`}
+                                                >
+                                                    <LikeIcon className="h-4 w-4" filled={isLiked} />
+                                                </button>
+                                            )}
+                                            {/* Drag handle - far right */}
+                                            {!isEditing && !smartViewActive && (
+                                                <button
+                                                    type="button"
+                                                    title={dict.list.drag}
+                                                    aria-label={dict.list.reorder(song.title)}
+                                                    onPointerDown={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        handlePress(e, song, index, true);
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                    }}
+                                                    className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-white/15 group-hover:text-white/45 hover:text-white/70 hover:bg-white/8 transition-all duration-200 ml-0.5"
+                                                    style={{ cursor: isDrag ? 'grabbing' : 'grab' }}
+                                                >
+                                                    <GripIcon className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
                                          </div>
                                      );
                                  })}

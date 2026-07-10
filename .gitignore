@@ -1,30 +1,15 @@
-node_modules/
-dist/
-release/
-.vite/
-.vite-temp/
+# Backup directories
+BiliMusic_backup/
+BiliMusic_backup_*/
+
+# BiliMusic build artifacts
+BiliMusic/node_modules/
+BiliMusic/dist/
+BiliMusic/release/
+BiliMusic/.vite/
+
+# Logs and cache
 *.log
-*.tmp
-*.cache
 __pycache__/
-*.py[cod]
-.DS_Store
-Thumbs.db
-
-# Generated media and local downloads
-VipSongsDownload/
-aura-music-original/
-*.mflac
-*.mp3
-*.mp4
-*.flac
-*.wav
-*.qmcflac
-
-# Electron/Vite generated output in nested apps
-**/node_modules/
-**/dist/
-**/release/
-**/.vite/
-**/.vite-temp/
-**/__pycache__/
+*.pyc
+BiliMusic/TODO.txt

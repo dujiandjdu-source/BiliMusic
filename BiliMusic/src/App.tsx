@@ -96,6 +96,18 @@ const App: React.FC = () => {
     }
   }, [volume, audioRef]);
 
+  // BrowserView show/hide + pause on mode switch
+  useEffect(() => {
+    const api = window.electronAPI?.browser;
+    if (appMode === "video") {
+      api?.show();
+      pause();
+    } else {
+      api?.hide();
+    }
+  }, [appMode]);
+
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     let meta = document.querySelector<HTMLMetaElement>(
