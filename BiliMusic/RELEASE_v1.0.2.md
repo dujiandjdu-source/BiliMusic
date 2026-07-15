@@ -39,6 +39,7 @@
 - scripts/create-self-signed-cert.ps1
 
 修改:
+- package.json (版本号 1.0.1 → 1.0.2)
 - src/components/LyricsView.tsx (性能优化)
 - src/components/PlaylistPanel.tsx (Bug修复)
 - src/components/SearchModal.tsx (UI修复)
@@ -48,12 +49,12 @@
 
 ### 📝 备注
 
-- 本次更新为本地开发版本，未添加代码签名
-- Windows 安全警告将在购买证书后解决
+- 本次更新为累积修复版本，建议所有用户升级
+- Windows 安全警告将在购买代码签名证书后解决
 - 详见 `CODE_SIGNING.md` 了解代码签名配置
 
 ---
 
-**下载**: [BiliMusic 1.0.2.exe](https://github.com/dujiandjdu-source/BiliMusic/releases/download/v1.0.2/BiliMusic-1.0.2.exe)
+**下载**: [BiliMusic 1.0.2.exe](https://github.com/dujiandjdu-source/BiliMusic/releases/download/v1.0.2/BiliMusic%201.0.2.exe)
 
 **完整变更**: [v1.0.1...v1.0.2](https://github.com/dujiandjdu-source/BiliMusic/compare/v1.0.1...v1.0.2)
