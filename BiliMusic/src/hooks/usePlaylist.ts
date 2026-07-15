@@ -419,21 +419,32 @@ export const usePlaylist = () => {
     });
   }, []);
 
-  const removeSongs = useCallback((ids: string[]) => {
+  const removeSongs = useCallback((ids: string[], options?: { onWillRemovePlaying?: () => boolean }) => {
     if (ids.length === 0) return;
     const locals = new Set<string>();
 
-    setQueue((prev) => {
-      prev.forEach((song) => {
-        if (ids.includes(song.id) && song.fileUrl && !song.fileUrl.startsWith("blob:")) {
-          audioResourceCache.delete(song.fileUrl);
-        }
-        if (ids.includes(song.id) && song.source === "local") {
-          locals.add(song.id);
-        }
-      });
-      return prev.filter((song) => !ids.includes(song.id));
+    // 检查是否要删除正在播放的歌曲
+    if (options?.onWillRemovePlaying) {
+      const shouldProceed = options.onWillRemovePlaying();
+      if (!shouldProceed) return;
+    }
+
+    // 先收集需要释放的资源（在 setQueue 外部）
+    const urlsToRelease: string[] = [];
+    queueRef.current.forEach((song) => {
+      if (ids.includes(song.id) && song.fileUrl && !song.fileUrl.startsWith("blob:")) {
+        urlsToRelease.push(song.fileUrl);
+      }
+      if (ids.includes(song.id) && song.source === "local") {
+        locals.add(song.id);
+      }
     });
+
+    // 释放缓存资源（在 setQueue 外部执行副作用）
+    urlsToRelease.forEach((url) => audioResourceCache.delete(url));
+
+    setQueue((prev) => prev.filter((song) => !ids.includes(song.id)));
+
     if (locals.size > 0) {
       const list = Array.from(locals);
       dropUrls(list);

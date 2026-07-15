@@ -122,7 +122,8 @@ export const useSearchModal = ({
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
-      if (scrollHeight - scrollTop - clientHeight >= 100) return;
+      // Load more when within 200px of bottom (was 100px)
+      if (scrollHeight - scrollTop - clientHeight > 200) return;
 
       if (activeTab === "netease") {
         loadMoreNetease();

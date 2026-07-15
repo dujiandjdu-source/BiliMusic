@@ -728,15 +728,18 @@ const SearchModal: React.FC<SearchModalProps> = ({
                     );
                   })}
 
-                  {/* Loading Indicator */}
+                  {/* Loading Indicator / Load More */}
                   {search.neteaseProvider.hasMore && (
                     <div className="py-6 flex items-center justify-center">
                       {search.neteaseProvider.isLoading ? (
                         <div className="w-5 h-5 border-2 border-white/20 border-t-white/60 rounded-full animate-spin"></div>
                       ) : (
-                        <div className="text-white/20 text-xs">
-                          {dict.search.more}
-                        </div>
+                        <button
+                          onClick={search.loadMoreNetease}
+                          className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white text-xs font-medium transition-all"
+                        >
+                          {dict.search.more} ↓
+                        </button>
                       )}
                     </div>
                   )}
@@ -744,7 +747,6 @@ const SearchModal: React.FC<SearchModalProps> = ({
               )}
             </div>
           )}
-        </div>
 
           {/* Bilibili Results */}
           {search.activeTab === "bilibili" && (
@@ -904,15 +906,18 @@ const SearchModal: React.FC<SearchModalProps> = ({
                     );
                   })}
 
-                  {/* Loading Indicator */}
+                  {/* Loading Indicator / Load More */}
                   {search.bilibiliProvider.hasMore && (
                     <div className="py-6 flex items-center justify-center">
                       {search.bilibiliProvider.isLoading ? (
                         <div className="w-5 h-5 border-2 border-white/20 border-t-white/60 rounded-full animate-spin"></div>
                       ) : (
-                        <div className="text-white/20 text-xs">
-                          {dict.search.more}
-                        </div>
+                        <button
+                          onClick={search.loadMoreBilibili}
+                          className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white text-xs font-medium transition-all"
+                        >
+                          {dict.search.more} ↓
+                        </button>
                       )}
                     </div>
                   )}
@@ -920,6 +925,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
               )}
             </div>
           )}
+        </div>
 
         {/* Context Menu Portal */}
         {search.contextMenu &&

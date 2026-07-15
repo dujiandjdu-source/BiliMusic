@@ -509,8 +509,18 @@ const PlaylistPanel = React.memo(({
             return;
         }
 
+        let rafId: number | null = null;
+        let pendingHeight = 0;
+
         const sync = () => {
-            setListHeight(list.clientHeight);
+            if (rafId !== null) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                if (pendingHeight !== list.clientHeight) {
+                    pendingHeight = list.clientHeight;
+                    setListHeight(pendingHeight);
+                }
+            });
         };
 
         sync();
@@ -526,6 +536,9 @@ const PlaylistPanel = React.memo(({
         observer.observe(list);
         return () => {
             observer.disconnect();
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+            }
         };
     }, [isOpen]);
 
@@ -1070,17 +1083,17 @@ const PlaylistPanel = React.memo(({
                                                 else onPlay(index);
                                             }}
                                             className={`
-                                     absolute left-0 right-0 h-[66px]
-                                     group flex items-center gap-3 p-2 mx-2 rounded-2xl cursor-pointer transition-all duration-200
+                                     absolute left-0 right-0
+                                     group flex items-center gap-3 p-2 mx-2 rounded-2xl cursor-pointer
                                      ${isEditing ? 'hover:bg-white/10' : isCurrent ? 'bg-white/10 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]' : 'hover:bg-white/5'}
-                                     ${isDrag ? 'opacity-0 scale-[0.98]' : ''}
+                                     ${isDrag ? 'opacity-0 scale-[0.98]' : 'opacity-100 scale-100'}
                                  `}
                                             style={{
                                                 top: `${view * ITEM_HEIGHT}px`,
                                                 height: `${CARD_HEIGHT}px`,
                                                 touchAction: isEditing ? 'auto' : 'pan-y',
-                                                transition: 'top 180ms ease, opacity 180ms ease, transform 180ms ease',
-                                                willChange: 'top, opacity, transform',
+                                                transition: isDrag ? 'opacity 180ms ease, transform 180ms ease' : 'top 180ms ease, opacity 180ms ease, transform 180ms ease',
+                                                willChange: isDrag ? 'opacity, transform' : 'auto',
                                             }}
                                         >
                                             {/* Edit Mode Checkbox */}
@@ -1107,20 +1120,20 @@ const PlaylistPanel = React.memo(({
 
                                                 {/* Redesigned Now Playing Indicator (Equalizer) */}
                                                 {isCurrent && !isEditing && (
-                                                    <div className="absolute inset-0 flex items-center justify-center gap-[3px]">
-                                                        <div className="w-[3px] bg-current rounded-full animate-[eq-bounce_1s_ease-in-out_infinite]" style={{ height: '12px', color: accentColor }}></div>
-                                                        <div className="w-[3px] bg-current rounded-full animate-[eq-bounce_1s_ease-in-out_infinite_0.2s]" style={{ height: '20px', color: accentColor }}></div>
-                                                        <div className="w-[3px] bg-current rounded-full animate-[eq-bounce_1s_ease-in-out_infinite_0.4s]" style={{ height: '15px', color: accentColor }}></div>
+                                                    <div className="absolute inset-0 flex items-center justify-center gap-[3px] pointer-events-none">
+                                                        <div className="w-[3px] bg-current rounded-full animate-[eq-bounce_1s_ease-in-out_infinite] will-change-transform" style={{ height: '12px', color: accentColor }}></div>
+                                                        <div className="w-[3px] bg-current rounded-full animate-[eq-bounce_1s_ease-in-out_infinite_0.2s] will-change-transform" style={{ height: '20px', color: accentColor }}></div>
+                                                        <div className="w-[3px] bg-current rounded-full animate-[eq-bounce_1s_ease-in-out_infinite_0.4s] will-change-transform" style={{ height: '15px', color: accentColor }}></div>
                                                     </div>
                                                 )}
                                             </div>
 
                                             {/* Text + Actions (hover toggles between layers) */}
-                                            <div className="flex-1 min-w-0 relative">
+                                            <div className="flex-1 min-w-0 relative overflow-hidden">
                                                 {/* Default: title + artist (fades out on hover) */}
-                                                <div className="group-hover:opacity-0 transition-opacity duration-150">
+                                                <div className="group-hover:opacity-0 group-hover:invisible transition-all duration-150 ease-out">
                                                     <div className="flex flex-col justify-center gap-0.5">
-                                                        <div className={`text-[15px] font-semibold truncate leading-tight transition-colors duration-300`}
+                                                        <div className={`text-[15px] font-semibold truncate leading-tight`}
                                                             style={{ color: isCurrent ? accentColor : 'rgba(255,255,255,0.9)' }}>
                                                             {song.title}
                                                         </div>
@@ -1131,7 +1144,7 @@ const PlaylistPanel = React.memo(({
                                                 </div>
                                                 {/* Hover overlay: 收藏 - 品质 - 删除 - 拖拽 */}
                                                 {!isEditing && (
-                                                    <div className="absolute inset-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                                                    <div className="absolute inset-0 flex items-center gap-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 ease-out">
                                                         <button
                                                             type="button"
                                                             title={isFavorite ? "取消收藏" : "收藏"}

@@ -229,6 +229,24 @@ const LyricsView: React.FC<LyricsViewProps> = ({
   // Track pointer-down state for press animation
   const downRef = useRef(false);
 
+  // Object pool for render queue to reduce GC pressure
+  const renderQueuePoolRef = useRef<Array<{
+    index: number;
+    line: ILyricLine;
+    visualY: number;
+    lineHeight: number;
+    opacity: number;
+    blur: number;
+    scale: number;
+    pressScale: number;
+    isActive: boolean;
+    drawActive: boolean;
+    isHovering: boolean;
+    hoverProgress: number;
+    isPressed: boolean;
+  }>>([]);
+  const activeIndicesRef = useRef<number[]>([]);
+
   const pick = (clientY: number, rect: DOMRect) => {
     const hitY = clientY - rect.top;
     const focal = rect.height * 0.25;
@@ -469,21 +487,13 @@ const LyricsView: React.FC<LyricsViewProps> = ({
     const paddingX = isMobile ? 24 : 56;
     const focalPointOffset = height * 0.25;
 
-    const queue: Array<{
-      index: number;
-      line: ILyricLine;
-      visualY: number;
-      lineHeight: number;
-      opacity: number;
-      blur: number;
-      scale: number;
-      pressScale: number;
-      isActive: boolean;
-      drawActive: boolean;
-      isHovering: boolean;
-      hoverProgress: number;
-      isPressed: boolean;
-    }> = [];
+    // Reuse arrays from pool to reduce GC pressure
+    const queue = renderQueuePoolRef.current;
+    queue.length = 0; // Clear without reallocating
+
+    // Pre-allocate active indices array
+    const activeIndices = activeIndicesRef.current;
+    activeIndices.length = 0;
 
     lyricLines.forEach((line, index) => {
       const physics = linesState.current.get(index);
@@ -593,17 +603,43 @@ const LyricsView: React.FC<LyricsViewProps> = ({
       });
     });
 
-    queue
-      .sort((a, b) => {
-        if (Math.abs(a.visualY - b.visualY) > 0.5) {
-          return a.visualY - b.visualY;
+    // Sort by visual Y position for correct rendering order
+    // Use insertion sort for small arrays (typically < 50 lines) - O(n) for nearly sorted
+    const len = queue.length;
+    if (len > 1) {
+      // Simple insertion sort - more efficient for small/nearly-sorted arrays
+      for (let i = 1; i < len; i++) {
+        const item = queue[i];
+        let j = i - 1;
+
+        // Compare with previous elements
+        while (j >= 0) {
+          const prev = queue[j];
+          let shouldSwap = false;
+
+          // First compare by visualY
+          if (Math.abs(item.visualY - prev.visualY) > 0.5) {
+            shouldSwap = item.visualY < prev.visualY;
+          } else if (item.line.isBackgroundLine() !== prev.line.isBackgroundLine()) {
+            // Then by background line status (background lines go behind)
+            shouldSwap = item.line.isBackgroundLine() && !prev.line.isBackgroundLine();
+          } else {
+            // Finally by index
+            shouldSwap = item.index < prev.index;
+          }
+
+          if (!shouldSwap) break;
+
+          queue[j + 1] = prev;
+          j--;
         }
-        if (a.line.isBackgroundLine() !== b.line.isBackgroundLine()) {
-          return a.line.isBackgroundLine() ? 1 : -1;
-        }
-        return a.index - b.index;
-      })
-      .forEach((item) => {
+        queue[j + 1] = item;
+      }
+    }
+
+    // Batch the drawing operations
+    for (let i = 0; i < queue.length; i++) {
+      const item = queue[i];
         const useVisualTime = item.drawActive || item.line.isBackgroundLine();
         item.line.draw(
           useVisualTime ? visualTime : currentTime,
@@ -639,7 +675,7 @@ const LyricsView: React.FC<LyricsViewProps> = ({
         );
 
         ctx.restore();
-      });
+      }
 
     // Draw Mask
     ctx.globalCompositeOperation = "destination-in";
