@@ -1,5 +1,7 @@
 import { MusicLibrary, PlayMode, Song } from "../types";
 import { getNeteaseAudioUrl } from "./lyricsService";
+import { normalizeSongMetadata } from "./songMetadata";
+import { makeBiliAudioUrl } from "./songFactory";
 
 const DB = "bili-music";
 const VER = 1;
@@ -13,6 +15,8 @@ const MODES = [PlayMode.LOOP_ALL, PlayMode.LOOP_ONE, PlayMode.SHUFFLE];
 export interface StoredSong {
   id: string;
   title: string;
+  originalTitle?: string;
+  biliVideoTitle?: string;
   artist: string;
   source: "local" | "remote" | "bilibili";
   audioQuality?: Song["audioQuality"];
@@ -71,12 +75,14 @@ export const getDefaultMusicLibrary = (): MusicLibrary => ({
   playlists: [],
 });
 
-const normalizeMusicLibrary = (input?: Partial<MusicLibrary>): MusicLibrary => {
+export const normalizeMusicLibrary = (input?: Partial<MusicLibrary>): MusicLibrary => {
   const base = getDefaultMusicLibrary();
   return {
     profile: {
       ...base.profile,
-      ...(input?.profile && typeof input.profile === "object" ? input.profile : {}),
+      displayName: typeof input?.profile?.displayName === "string" ? input.profile.displayName : base.profile.displayName,
+      bio: typeof input?.profile?.bio === "string" ? input.profile.bio : base.profile.bio,
+      avatarUrl: typeof input?.profile?.avatarUrl === "string" ? input.profile.avatarUrl : undefined,
     },
     likedSongIds: Array.isArray(input?.likedSongIds)
       ? input.likedSongIds.filter((id): id is string => typeof id === "string")
@@ -89,13 +95,13 @@ const normalizeMusicLibrary = (input?: Partial<MusicLibrary>): MusicLibrary => {
           .filter((playlist) => playlist && typeof playlist.id === "string")
           .map((playlist) => ({
             id: playlist.id,
-            name: playlist.name || "未命名歌单",
+            name: typeof playlist.name === "string" && playlist.name.trim() ? playlist.name.trim() : "未命名歌单",
             songIds: Array.isArray(playlist.songIds)
               ? playlist.songIds.filter((id): id is string => typeof id === "string")
               : [],
             createdAt: Number(playlist.createdAt) || Date.now(),
             updatedAt: Number(playlist.updatedAt) || Date.now(),
-            coverUrl: playlist.coverUrl,
+            coverUrl: typeof playlist.coverUrl === "string" ? playlist.coverUrl : undefined,
           }))
       : [],
   };
@@ -152,10 +158,13 @@ const runDb = async <T>(
   }
 
   const tx = db.transaction(names, mode);
+  // Register before running requests; a synchronous transaction must not be missed.
+  const completion = waitTx(tx);
+  void completion.catch(() => {});
 
   try {
     const value = await run(tx);
-    await waitTx(tx);
+    await completion;
     return value;
   } finally {
     db.close();
@@ -168,6 +177,8 @@ export const toStoredSong = (song: Song): StoredSong => {
   return {
     id: song.id,
     title: song.title,
+    originalTitle: song.originalTitle,
+    biliVideoTitle: song.biliVideoTitle,
     artist: song.artist,
     source,
     audioQuality: song.audioQuality,
@@ -193,9 +204,10 @@ export const fromStoredSong = (song: StoredSong, fileUrl?: string): Song | null 
       return null;
     }
 
-    return {
+    return normalizeSongMetadata({
       id: song.id,
       title: song.title,
+      originalTitle: song.originalTitle,
       artist: song.artist,
       fileUrl,
       source: "local",
@@ -208,21 +220,23 @@ export const fromStoredSong = (song: StoredSong, fileUrl?: string): Song | null 
       isNetease: song.isNetease,
       neteaseId: song.neteaseId,
       album: song.album,
-    };
+    });
   }
 
   const origin = song.isBilibili && song.bvid
-    ? `bili-audio://play/${encodeURIComponent(song.bvid)}?cid=${encodeURIComponent(song.biliCid || "")}&quality=${encodeURIComponent(song.audioQuality || "auto")}`
+    ? makeBiliAudioUrl(song.bvid, song.biliCid, song.audioQuality || "auto")
     : song.isNetease && song.neteaseId
-      ? getNeteaseAudioUrl(song.neteaseId)
+      ? getNeteaseAudioUrl(song.neteaseId, song.audioQuality || "standard")
       : song.origin ?? "";
   if (!origin) {
     return null;
   }
 
-  return {
+  return normalizeSongMetadata({
     id: song.id,
     title: song.title,
+    originalTitle: song.originalTitle,
+    biliVideoTitle: song.biliVideoTitle,
     artist: song.artist,
     fileUrl: origin,
     source: song.source,
@@ -240,7 +254,7 @@ export const fromStoredSong = (song: StoredSong, fileUrl?: string): Song | null 
     bvid: song.bvid,
     biliCid: song.biliCid,
     upName: song.upName,
-  };
+  });
 };
 
 export const buildLibrarySnapshot = (
@@ -253,16 +267,20 @@ export const buildLibrarySnapshot = (
   };
 };
 
+let pendingSnapshotSave: Promise<unknown> = Promise.resolve();
+
 export const saveLibrarySnapshot = async (
   queue: Song[],
   library?: MusicLibrary,
 ) => {
   const snap = buildLibrarySnapshot(queue, library);
 
-  await runDb([META], "readwrite", async (tx) => {
-    await waitReq(tx.objectStore(META).put(snap, SNAP));
-    return undefined;
-  });
+  const save = pendingSnapshotSave.then(() => runDb([META], "readwrite", async (tx) => {
+      await waitReq(tx.objectStore(META).put(snap, SNAP));
+      return undefined;
+    }));
+  pendingSnapshotSave = save.catch(() => {});
+  await save;
 };
 
 export const parseLibrarySnapshot = (raw: unknown): LibrarySnapshot | null => {
@@ -277,7 +295,41 @@ export const parseLibrarySnapshot = (raw: unknown): LibrarySnapshot | null => {
       ? snap.queue
       : [];
 
-  return { queue, library: normalizeMusicLibrary(snap.library) };
+  const validQueue = queue.filter((song) => song && typeof song.id === "string" && song.id.trim() &&
+    typeof song.title === "string" && typeof song.artist === "string" &&
+    ["local", "remote", "bilibili"].includes(song.source) &&
+    (!song.isBilibili || (typeof song.bvid === "string" && Boolean(song.bvid))) &&
+    (!song.isNetease || (typeof song.neteaseId === "string" && Boolean(song.neteaseId))));
+  const ids = new Set<string>();
+  return { queue: validQueue.filter((song) => {
+    if (ids.has(song.id)) return false;
+    ids.add(song.id);
+    return true;
+  }).map(sanitizeStoredSong), library: normalizeMusicLibrary(snap.library) };
+};
+
+/** Treat persisted metadata as external input, including nested lyric rows. */
+const sanitizeStoredSong = (input: StoredSong): StoredSong => {
+  const song = { ...input };
+  const strings = ["originalTitle", "biliVideoTitle", "origin", "coverUrl", "themeColor", "album", "upName"] as const;
+  for (const key of strings) if (typeof song[key] !== "string") delete song[key];
+  if (!["auto", "standard", "high", "lossless"].includes(song.audioQuality || "")) delete song.audioQuality;
+  if (!Number.isFinite(song.biliCid)) delete song.biliCid;
+  song.colors = Array.isArray(song.colors) ? song.colors.filter((color) => typeof color === "string" && /^#[0-9a-f]{3,8}$/i.test(color)) : [];
+  song.lyrics = Array.isArray(song.lyrics) ? song.lyrics
+    .filter((line) => line && typeof line.text === "string" && Number.isFinite(line.time))
+    .map((line) => {
+      const clean = { ...line };
+      for (const key of ["key", "translation", "romanization", "agent"] as const) {
+        if (typeof clean[key] !== "string") delete clean[key];
+      }
+      if (!Number.isFinite(clean.endTime)) delete clean.endTime;
+      clean.words = Array.isArray(clean.words) ? clean.words
+        .filter((word) => word && typeof word.text === "string" && Number.isFinite(word.startTime) && Number.isFinite(word.endTime))
+        .map((word) => ({ text: word.text, startTime: word.startTime, endTime: word.endTime })) : undefined;
+      return clean;
+    }) : [];
+  return song;
 };
 
 export const loadLibrarySnapshot = async (): Promise<LibrarySnapshot | null> => {
@@ -294,11 +346,12 @@ export const saveLocalFiles = async (list: Array<{ id: string; file: Blob }>) =>
     return;
   }
 
-  await runDb([FILES], "readwrite", async (tx) => {
+  const result = await runDb([FILES], "readwrite", async (tx) => {
     const store = tx.objectStore(FILES);
     await Promise.all(list.map((item) => waitReq(store.put(item.file, item.id))));
     return undefined;
   });
+  if (result === null) throw new Error("本地音乐存储不可用");
 };
 
 export const loadLocalFile = async (id: string): Promise<Blob | null> => {
@@ -419,7 +472,8 @@ export const loadPlaybackSnapshot = (): PlaybackSnapshot => {
     return getDefaultPlayback();
   }
 
-  return parsePlaybackSnapshot(window.localStorage.getItem(PLAYBACK));
+  try { return parsePlaybackSnapshot(window.localStorage.getItem(PLAYBACK)); }
+  catch { return getDefaultPlayback(); }
 };
 
 export const savePlaybackSnapshot = (snap: PlaybackSnapshot) => {
@@ -427,5 +481,6 @@ export const savePlaybackSnapshot = (snap: PlaybackSnapshot) => {
     return;
   }
 
-  window.localStorage.setItem(PLAYBACK, JSON.stringify(snap));
+  try { window.localStorage.setItem(PLAYBACK, JSON.stringify(snap)); }
+  catch (error) { console.warn("Failed to save playback state", error); }
 };

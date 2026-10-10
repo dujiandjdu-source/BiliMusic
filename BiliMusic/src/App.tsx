@@ -19,6 +19,7 @@ import { keyboardRegistry } from "./services/keyboardRegistry";
 import MediaSessionController from "./components/MediaSessionController";
 import { getThemeColor } from "./services/utils";
 import type { BilibiliVideoInfo } from "./types";
+import { sameSong } from "./services/songIdentity";
 
 const App: React.FC = () => {
   const { toast } = useToast();
@@ -54,7 +55,6 @@ const App: React.FC = () => {
     handleAudioEnded,
     play,
     pause,
-    resolvedAudioSrc,
     isBuffering,
   } = player;
 
@@ -177,12 +177,16 @@ const App: React.FC = () => {
   }, []);
 
   const handleFileChange = async (files: FileList) => {
+    try {
     const wasEmpty = playlist.queue.length === 0;
     const addedSongs = await playlist.addLocalFiles(files);
     if (addedSongs.length > 0) {
       setTimeout(() => {
         handlePlaylistAddition(addedSongs, wasEmpty);
       }, 0);
+    }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "本地音乐导入失败");
     }
   };
 
@@ -239,12 +243,7 @@ const App: React.FC = () => {
 
   const handleImportAndPlay = useCallback((song: Song) => {
     // Check if song already exists in queue (by neteaseId for cloud songs, or by id)
-    const existingIndex = playlist.queue.findIndex((s) => {
-      if (song.isNetease && s.isNetease) {
-        return s.neteaseId === song.neteaseId;
-      }
-      return s.id === song.id;
-    });
+    const existingIndex = playlist.queue.findIndex((item) => sameSong(item, song));
 
     if (existingIndex !== -1) {
       // Song already in queue, just play it
@@ -420,7 +419,7 @@ const App: React.FC = () => {
 
       <audio
         ref={audioRef}
-        src={resolvedAudioSrc ?? currentSong?.fileUrl}
+        src={currentSong?.fileUrl}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleAudioEnded}

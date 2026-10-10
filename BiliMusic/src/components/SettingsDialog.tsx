@@ -10,8 +10,73 @@ import type {
   UserProfile,
 } from "../types";
 import { CloseIcon, BilibiliIcon, LikeIcon } from "./Icons";
+import { clearResourceCaches } from "../services/cache";
 
 type SettingsTab = "profile" | "account" | "liked" | "favorites" | "playlists" | "about";
+
+interface ParsedSemver {
+  core: [string, string, string];
+  prerelease: string[];
+}
+
+const parseSemver = (value: string): ParsedSemver | null => {
+  const match = value.trim().match(
+    /^[vV]?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+  );
+  if (!match) return null;
+
+  const prerelease = match[4] ? match[4].split(".") : [];
+  if (prerelease.some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith("0"))) {
+    return null;
+  }
+
+  return {
+    core: [match[1], match[2], match[3]],
+    prerelease,
+  };
+};
+
+const compareNumericIdentifiers = (left: string, right: string) => {
+  if (left.length !== right.length) return left.length > right.length ? 1 : -1;
+  if (left === right) return 0;
+  return left > right ? 1 : -1;
+};
+
+const compareSemver = (leftValue: string, rightValue: string): number | null => {
+  const left = parseSemver(leftValue);
+  const right = parseSemver(rightValue);
+  if (!left || !right) return null;
+
+  for (let index = 0; index < left.core.length; index += 1) {
+    const comparison = compareNumericIdentifiers(left.core[index], right.core[index]);
+    if (comparison !== 0) return comparison;
+  }
+
+  if (left.prerelease.length === 0 || right.prerelease.length === 0) {
+    if (left.prerelease.length === right.prerelease.length) return 0;
+    return left.prerelease.length === 0 ? 1 : -1;
+  }
+
+  const length = Math.max(left.prerelease.length, right.prerelease.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = left.prerelease[index];
+    const rightPart = right.prerelease[index];
+    if (leftPart === undefined || rightPart === undefined) {
+      return leftPart === undefined ? -1 : 1;
+    }
+    if (leftPart === rightPart) continue;
+
+    const leftNumeric = /^\d+$/.test(leftPart);
+    const rightNumeric = /^\d+$/.test(rightPart);
+    if (leftNumeric && rightNumeric) {
+      return compareNumericIdentifiers(leftPart, rightPart);
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart > rightPart ? 1 : -1;
+  }
+
+  return 0;
+};
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -77,6 +142,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "up-to-date" | "error">("idle");
   const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string } | null>(null);
   const [cacheSize, setCacheSize] = useState<string>("");
+  const [isClearingCache, setIsClearingCache] = useState(false);
   const pollToken = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -301,25 +367,35 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 text-white"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-2 text-white sm:p-4"
       onMouseDown={(event) => {
         if (!(event.target as HTMLElement).closest(".settings-inner")) onClose();
       }}
     >
-      <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
-      <div className="settings-inner relative flex h-[680px] w-full max-w-[860px] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-black/60 shadow-2xl backdrop-blur-2xl">
-        <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+      <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" aria-hidden="true" />
+      <div
+        className="settings-inner relative flex h-[680px] max-h-[calc(100dvh-1rem)] w-full max-w-[860px] flex-col overflow-hidden rounded-[18px] border border-white/10 bg-black/60 shadow-2xl backdrop-blur-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-[24px]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
           <div>
-            <h2 className="text-xl font-bold">设置与音乐库</h2>
+            <h2 id="settings-dialog-title" className="text-xl font-bold">设置与音乐库</h2>
             <p className="mt-1 text-xs text-white/40">个人主页、B站账号、喜欢收藏与歌单管理</p>
           </div>
-          <button onClick={onClose} className="p-1 text-white/60 hover:text-white">
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 p-1 text-white/60 hover:text-white"
+            aria-label="关闭设置"
+          >
             <CloseIcon className="h-5 w-5" />
           </button>
         </header>
 
-        <div className="flex min-h-0 flex-1">
-          <aside className="w-44 border-r border-white/10 p-3">
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          <aside className="flex w-full shrink-0 gap-1 overflow-x-auto border-b border-white/10 p-2 sm:block sm:w-44 sm:overflow-visible sm:border-b-0 sm:border-r sm:p-3">
             {([
               ["profile", "个人主页"],
               ["account", "B站账号"],
@@ -331,7 +407,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
               <button
                 key={value}
                 onClick={() => setTab(value)}
-                className={`mb-1 w-full rounded-xl px-3 py-2.5 text-left text-sm ${
+                className={`w-auto shrink-0 whitespace-nowrap rounded-xl px-3 py-2.5 text-left text-sm sm:mb-1 sm:w-full ${
                   tab === value
                     ? "bg-white/10 font-medium text-white"
                     : "text-white/55 hover:bg-white/5 hover:text-white"
@@ -342,7 +418,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
             ))}
           </aside>
 
-          <main className="min-w-0 flex-1 overflow-y-auto p-6">
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
             {tab === "profile" && (
               <div className="space-y-4">
                 <section className="rounded-3xl border border-white/8 bg-white/5 p-5">
@@ -697,7 +773,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
             {tab === "about" && (
               <div className="space-y-4">
                 <div className="rounded-2xl border border-white/5 bg-white/5 p-5 text-sm text-white/55">
-                  <h3 className="mb-2 font-semibold text-white">BiliMusic 1.0.0</h3>
+                  <h3 className="mb-2 font-semibold text-white">BiliMusic {__APP_VERSION__}</h3>
                   <p>本地音乐、网易云导入与 B 站视频声轨播放器。支持个人主页、喜欢、收藏、歌单与单曲品质偏好。</p>
                 </div>
 
@@ -711,17 +787,36 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                     <button
                       onClick={async () => {
                         setUpdateStatus("checking");
+                        setUpdateInfo(null);
                         try {
-                          const res = await fetch("https://api.github.com/repos/dujian1/BiliMusic/releases/latest");
-                          if (res.ok) {
-                            const data = await res.json();
-                            const latestVer = data.tag_name?.replace(/^v/, "");
-                            if (latestVer && latestVer !== "1.0.0") {
-                              setUpdateStatus("available");
-                              setUpdateInfo({ version: latestVer, url: data.html_url });
-                            } else {
-                              setUpdateStatus("up-to-date");
-                            }
+                          const res = await fetch("https://api.github.com/repos/dujiandjdu-source/BiliMusic/releases/latest");
+                          if (!res.ok) {
+                            throw new Error(`GitHub returned ${res.status}`);
+                          }
+
+                          const data = (await res.json()) as {
+                            tag_name?: unknown;
+                            html_url?: unknown;
+                          };
+                          if (typeof data.tag_name !== "string") {
+                            throw new Error("Release version is missing");
+                          }
+
+                          const comparison = compareSemver(data.tag_name, __APP_VERSION__);
+                          if (comparison === null) {
+                            throw new Error("Release version is invalid");
+                          }
+
+                          if (comparison > 0) {
+                            const latestVer = data.tag_name.replace(/^[vV]/, "");
+                            setUpdateStatus("available");
+                            setUpdateInfo({
+                              version: latestVer,
+                              url:
+                                typeof data.html_url === "string"
+                                  ? data.html_url
+                                  : "https://github.com/dujiandjdu-source/BiliMusic/releases/latest",
+                            });
                           } else {
                             setUpdateStatus("up-to-date");
                           }
@@ -785,22 +880,26 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                     </div>
                     <button
                       onClick={async () => {
+                        setIsClearingCache(true);
+                        setCacheSize("");
                         try {
-                          if (window.electronAPI?.storeGet) {
-                            await window.electronAPI.storeSet("cache_cleared_at", Date.now());
-                          }
+                          await clearResourceCaches();
                           setCacheSize("已清除");
-                          setTimeout(() => setCacheSize(""), 3000);
                         } catch {
-                          setCacheSize("清除失败");
+                          setCacheSize("清除失败，请重试");
+                        } finally {
+                          setIsClearingCache(false);
                         }
                       }}
-                      className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/65 hover:bg-white/10 transition"
+                      disabled={isClearingCache}
+                      className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/65 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {cacheSize || "清除缓存"}
+                      {isClearingCache ? "清理中…" : "清除缓存"}
                     </button>
                   </div>
-                  <p className="text-xs text-white/30">缓存包括专辑封面、音频数据等临时文件</p>
+                  <p className="text-xs text-white/30" aria-live="polite">
+                    {cacheSize || "缓存包括专辑封面、音频数据等临时文件"}
+                  </p>
                 </div>
               </div>
             )}

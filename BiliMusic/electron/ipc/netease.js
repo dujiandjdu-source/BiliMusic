@@ -156,12 +156,35 @@ const searchBiliForAudio = async (ses, keyword) => {
 const songMetaCache = new Map();
 
 const setSongMeta = (songId, title, artist) => {
-  songMetaCache.set(songId, { title, artist });
+  const key = String(songId || "").trim();
+  if (!key) return;
+  songMetaCache.set(key, {
+    title: String(title || "").trim(),
+    artist: String(artist || "").trim(),
+  });
 };
 
 // Cache resolved audio URLs with TTL to avoid repeated API calls
 const audioUrlCache = new Map();
 const AUDIO_URL_TTL = 3600000; // 1 hour
+const EXPIRED_AUDIO_STATUSES = new Set([401, 403, 404, 410]);
+
+const resolveAudio = async (ses, songId, quality) => {
+  const neteaseResult = await tryNeteaseAudio(ses, songId, quality);
+  if (neteaseResult?.url) {
+    return { url: neteaseResult.url, source: "netease" };
+  }
+
+  const meta = songMetaCache.get(String(songId));
+  if (!meta) return null;
+
+  const keyword = [meta.title, meta.artist].filter(Boolean).join(" ");
+  if (!keyword) return null;
+  const biliResult = await searchBiliForAudio(ses, keyword);
+  return biliResult?.url
+    ? { url: biliResult.url, source: "bilibili" }
+    : null;
+};
 
 // Stream audio with proper Range support
 const streamAudio = (ses, request, remoteUrl, source) => {
@@ -192,29 +215,30 @@ const registerNeteaseProtocol = (ses) => {
 
       // Check cache first
       const cached = audioUrlCache.get(cacheKey);
-      if (cached && Date.now() - cached.time < AUDIO_URL_TTL) {
-        return streamAudio(ses, request, cached.url, cached.source);
+      if (cached && Date.now() - cached.time >= AUDIO_URL_TTL) {
+        audioUrlCache.delete(cacheKey);
       }
 
-      // Step 1: Try Netease directly
-      const neteaseResult = await tryNeteaseAudio(ses, songId, quality);
-      if (neteaseResult?.url) {
-        audioUrlCache.set(cacheKey, { url: neteaseResult.url, time: Date.now(), source: "netease" });
-        return streamAudio(ses, request, neteaseResult.url, "netease");
+      let resolved = audioUrlCache.get(cacheKey);
+      if (!resolved) {
+        resolved = await resolveAudio(ses, songId, quality);
+        if (!resolved) {
+          return new Response("No playable audio source available", { status: 404 });
+        }
+        resolved = { ...resolved, time: Date.now() };
+        audioUrlCache.set(cacheKey, resolved);
       }
 
-      // Step 2: Try B站 fallback
-      const meta = songMetaCache.get(songId);
-      if (meta) {
-        const keyword = `${meta.title} ${meta.artist}`;
-        const biliResult = await searchBiliForAudio(ses, keyword);
-        if (biliResult?.url) {
-          audioUrlCache.set(cacheKey, { url: biliResult.url, time: Date.now(), source: "bilibili" });
-          return streamAudio(ses, request, biliResult.url, "bilibili");
+      let response = await streamAudio(ses, request, resolved.url, resolved.source);
+      if (EXPIRED_AUDIO_STATUSES.has(response.status)) {
+        audioUrlCache.delete(cacheKey);
+        const refreshed = await resolveAudio(ses, songId, quality);
+        if (refreshed) {
+          audioUrlCache.set(cacheKey, { ...refreshed, time: Date.now() });
+          response = await streamAudio(ses, request, refreshed.url, refreshed.source);
         }
       }
-
-      return new Response("No playable audio source available", { status: 404 });
+      return response;
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Audio proxy failed";
       console.error("[netease-audio] Error:", msg);
@@ -227,23 +251,11 @@ module.exports = function registerNetease(ipc, ses) {
   registerNeteaseProtocol(ses);
 
   ipc.handle("netease:audio-url", async (_, songId, quality) => {
-    try {
-      const neteaseResult = await tryNeteaseAudio(ses, songId, quality);
-      if (neteaseResult?.url) {
-        return {
-          url: `netease-audio://${songId}?quality=${quality || "standard"}`,
-          code: 200,
-          source: "netease",
-        };
-      }
-      return {
-        url: `netease-audio://${songId}?quality=${quality || "standard"}`,
-        code: 200,
-        source: "pending",
-      };
-    } catch (error) {
-      return { url: null, code: -1, message: error instanceof Error ? error.message : String(error) };
-    }
+    return {
+      url: `netease-audio://${songId}?quality=${encodeURIComponent(quality || "standard")}`,
+      code: 200,
+      source: "pending",
+    };
   });
 
   ipc.handle("netease:set-meta", async (_, songId, title, artist) => {

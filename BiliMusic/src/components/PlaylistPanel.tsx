@@ -14,6 +14,7 @@ import {
 import { useI18n } from "../hooks/useI18n";
 import { useKeyboardScope } from "../hooks/useKeyboardScope";
 import ImportMusicDialog from "./ImportMusicDialog";
+import { getBilibiliCollectionTitle } from "../services/songMetadata";
 
 const PANEL_STYLES = `
   .playlist-scrollbar {
@@ -45,8 +46,9 @@ const PANEL_STYLES = `
   }
 `;
 
-const ITEM_HEIGHT = 74;
-const CARD_HEIGHT = 66;
+const ITEM_HEIGHT = 110;
+const CARD_HEIGHT = 102;
+const PANEL_HEIGHT = "min(80vh, 760px)";
 const OVERSCAN = 5;
 
 interface PlaylistPanelProps {
@@ -119,14 +121,14 @@ const HOLD_SLOP = 10;
 const Art = React.memo(({ src, alt, dim = false, eager = false }: ArtProps) => {
   if (!src) {
     return (
-      <div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded-lg border border-white/5 bg-gray-800 shadow-sm">
+      <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg border border-white/5 bg-gray-800 shadow-sm">
         <div className="flex h-full w-full items-center justify-center bg-gray-700 text-[10px] text-white/20">♪</div>
       </div>
     );
   }
 
   return (
-    <div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded-lg border border-white/5 bg-gray-800 shadow-sm">
+    <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg border border-white/5 bg-gray-800 shadow-sm">
       <img
         src={src}
         alt={alt}
@@ -194,7 +196,7 @@ const PlaylistPanel = React.memo(({
     const [query, setQuery] = useState("");
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
     const [sortMode, setSortMode] = useState<SortMode>("queue");
-    const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+    const [collapsedGroups, setCollapsedGroups] = useState<Set<string> | null>(null);
 
     const panelRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
@@ -215,8 +217,8 @@ const PlaylistPanel = React.memo(({
                 if (existing) {
                     existing.songs.push(song);
                 } else {
-                    // Extract base title (remove " - PartName" suffix)
-                    const baseTitle = (song.title || "").replace(/\s*[-–—]\s*[^-–—]+$/, "").trim() || song.title;
+                    // The collection name is stored independently from the part's song title.
+                    const baseTitle = getBilibiliCollectionTitle(song.biliVideoTitle?.trim() || song.originalTitle || song.title);
                     groups.set(song.bvid, {
                         bvid: song.bvid,
                         title: baseTitle,
@@ -230,12 +232,25 @@ const PlaylistPanel = React.memo(({
         // Only keep groups with more than 1 song
         const result = new Map<string, typeof groups extends Map<string, infer V> ? V : never>();
         groups.forEach((group, bvid) => {
+            group.title = getBilibiliCollectionTitle(group.songs[0].biliVideoTitle || group.songs[0].originalTitle || group.title,
+                group.songs.map((song) => song.originalTitle || song.title));
             if (group.songs.length > 1) result.set(bvid, group);
         });
         return result;
     }, [queue]);
 
+    // Initialize collapsed groups to all bvids on first render
+    useEffect(() => {
+        if (collapsedGroups === null && multiPartGroups.size > 0) {
+            setCollapsedGroups(new Set(multiPartGroups.keys()));
+        }
+    }, [collapsedGroups, multiPartGroups]);
+
     const visibleQueue = useMemo(() => {
+        const queueIndices = new Map<string, number>();
+        queue.forEach((song, index) => {
+            if (!queueIndices.has(song.id)) queueIndices.set(song.id, index);
+        });
         const rows: Array<{ song?: Song; index: number; isGroupHeader?: boolean; isSeparator?: boolean; groupBvid?: string; groupTitle?: string; groupArtist?: string; groupCover?: string; groupChildCount?: number; groupFirstSongIndex?: number }> = [];
 
         // ===== PASS 1: Multi-P groups (headers + expanded children) =====
@@ -279,7 +294,7 @@ const PlaylistPanel = React.memo(({
             if (sourceFilter !== "all" && sourceFilter !== "bilibili" && sourceFilter !== "bili-multi") return;
 
             // Group header
-            const _firstSongIdx = queue.findIndex((s) => s.id === group.songs[0]?.id);
+            const _firstSongIdx = queueIndices.get(group.songs[0]?.id) ?? -1;
             rows.push({
                 index: -1, isGroupHeader: true,
                 groupBvid: bvid, groupTitle: group.title,
@@ -289,9 +304,9 @@ const PlaylistPanel = React.memo(({
             });
 
             // Children (if expanded) + apply query filter
-            if (!collapsedGroups.has(bvid)) {
+            if (collapsedGroups && !collapsedGroups.has(bvid)) {
                 group.songs.forEach((song) => {
-                    const realIdx = queue.findIndex((s) => s.id === song.id);
+                    const realIdx = queueIndices.get(song.id) ?? -1;
                     if (!normalizedQuery) { rows.push({ song, index: realIdx }); return; }
                     if (`${song.title}\n${song.artist}`.toLocaleLowerCase().includes(normalizedQuery)) {
                         rows.push({ song, index: realIdx });
@@ -324,6 +339,10 @@ const PlaylistPanel = React.memo(({
 
     const smartViewActive =
         normalizedQuery.length > 0 || sourceFilter !== "all" || sortMode !== "queue";
+    const reorderAvailable =
+        !smartViewActive &&
+        visibleQueue.length === queue.length &&
+        visibleQueue.every((row, index) => row.song?.id === queue[index]?.id);
 
     // ESC key support using keyboard scope
     useKeyboardScope(
@@ -356,7 +375,11 @@ const PlaylistPanel = React.memo(({
     // Scroll to current song when opening
     useEffect(() => {
         if (isOpen && listRef.current) {
-            const index = queue.findIndex(s => s.id === currentSongId);
+            const current = queue.find((song) => song.id === currentSongId);
+            const index = visibleQueue.findIndex((row) =>
+                row.song?.id === currentSongId ||
+                Boolean(row.isGroupHeader && current?.bvid === row.groupBvid),
+            );
             if (index !== -1) {
                 const containerHeight = listRef.current.clientHeight;
                 const targetScroll = Math.max(
@@ -464,11 +487,11 @@ const PlaylistPanel = React.memo(({
     }, []);
 
     useEffect(() => {
-        if (!isOpen || isEditing || queue.length < 2 || smartViewActive) {
+        if (!isOpen || isEditing || queue.length < 2 || !reorderAvailable) {
             cancelPress();
             clearDrag();
         }
-    }, [cancelPress, clearDrag, isEditing, isOpen, queue.length, smartViewActive]);
+    }, [cancelPress, clearDrag, isEditing, isOpen, queue.length, reorderAvailable]);
 
     useEffect(() => {
         return () => {
@@ -556,7 +579,7 @@ const PlaylistPanel = React.memo(({
         index: number,
         instant = false,
     ) => {
-        if (isEditing || smartViewActive || queue.length < 2 || !listRef.current || pressRef.current || dragRef.current) {
+        if (isEditing || !reorderAvailable || queue.length < 2 || !listRef.current || pressRef.current || dragRef.current) {
             return;
         }
         if (e.pointerType === "mouse" && e.button !== 0) {
@@ -697,9 +720,9 @@ const PlaylistPanel = React.memo(({
 
         const virtualItems: RowState[] = [];
         for (let view = startIndex; view < endIndex; view += 1) {
-            const row = smartViewActive
-                ? visibleQueue[view]
-                : visibleQueue[drag ? sourceAt(view, drag) : view];
+            const row = reorderAvailable && drag
+                ? visibleQueue[sourceAt(view, drag)]
+                : visibleQueue[view];
             if (!row) continue;
             const index = row.index;
             const song = row.song;
@@ -727,7 +750,7 @@ const PlaylistPanel = React.memo(({
             virtualItems,
             totalHeight,
         };
-    }, [drag, listHeight, scrollTop, smartViewActive, visibleQueue]);
+    }, [drag, listHeight, reorderAvailable, scrollTop, visibleQueue]);
 
     useEffect(() => {
         if (!drag) {
@@ -800,11 +823,11 @@ const PlaylistPanel = React.memo(({
                         width: drag.w,
                     }}
                 >
-                    <div className="flex h-[66px] scale-[1.02] items-center gap-3 rounded-2xl border border-white/10 bg-black/45 px-2 shadow-[0_24px_50px_rgba(0,0,0,0.35)] backdrop-blur-[28px]">
+                    <div className="flex h-[102px] scale-[1.02] items-center gap-3 rounded-2xl border border-white/10 bg-black/45 px-2 shadow-[0_24px_50px_rgba(0,0,0,0.35)] backdrop-blur-[28px]">
                         <Art src={drag.song.coverUrl} alt={drag.song.title} eager />
                         <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
                             <div
-                                className="text-[15px] font-semibold truncate leading-tight"
+                                className="text-[17px] font-semibold truncate leading-tight"
                                 style={{
                                     color: drag.song.id === currentSongId
                                         ? accentColor
@@ -813,7 +836,7 @@ const PlaylistPanel = React.memo(({
                             >
                                 {drag.song.title}
                             </div>
-                            <div className="text-[13px] text-white/50 truncate font-medium">
+                            <div className="text-[14px] text-white/50 truncate font-medium">
                                 {drag.song.artist}
                             </div>
                         </div>
@@ -823,10 +846,10 @@ const PlaylistPanel = React.memo(({
             {transitions((style, item) => item && (
                 <animated.div
                     ref={panelRef}
-                    style={{ ...style, maxHeight: '60vh' }}
+                    style={{ ...style, height: PANEL_HEIGHT, maxHeight: "calc(100vh - 24px)" }}
                     className={`
                         absolute bottom-full right-0 mb-4 z-50
-                        w-[390px] max-w-[calc(100vw-24px)]
+                        w-[520px] max-w-[calc(100vw-24px)]
                         bg-black/10 backdrop-blur-[100px] saturate-150
                         rounded-[32px]
                         shadow-[0_20px_50px_rgba(0,0,0,0.3)]
@@ -1006,19 +1029,19 @@ const PlaylistPanel = React.memo(({
 
                                     // Group header rendering
                                     if (!song && item.isGroupHeader) {
-                                        const isCollapsed = collapsedGroups.has(item.groupBvid!);
+                                        const isCollapsed = !collapsedGroups || collapsedGroups.has(item.groupBvid!);
                                         return (
                                             <div
                                                 key={`group-${item.groupBvid}`}
                                                 className="group flex items-center gap-3 px-3 py-2 mx-1 my-0.5 cursor-pointer hover:bg-white/5 rounded-xl transition-colors border border-emerald-500/10 bg-emerald-500/[0.03] active:scale-[0.98]"
                                                 style={{
-                                                    height: "52px",
+                                                    height: `${CARD_HEIGHT}px`,
                                                     position: "absolute",
                                                     top: `${view * ITEM_HEIGHT}px`,
                                                     width: "calc(100% - 10px)",
                                                 }}
                                                 onClick={() => { if (isEditing) { const childIds = queue.filter(s => s.bvid === item.groupBvid).map(s => s.id); const ns = new Set(selectedIds); const allSel = childIds.every(id => ns.has(id)); if (allSel) { childIds.forEach(id => ns.delete(id)); } else { childIds.forEach(id => ns.add(id)); } setSelectedIds(ns); return; } setCollapsedGroups((prev) => {
-                                                        const next = new Set(prev);
+                                                        const next = new Set(prev || []);
                                                         const bvid = item.groupBvid!;
                                                         if (next.has(bvid)) next.delete(bvid);
                                                         else next.add(bvid);
@@ -1034,8 +1057,8 @@ const PlaylistPanel = React.memo(({
                                                     )}
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="text-[13px] font-semibold text-emerald-100/90 truncate">{item.groupTitle}</div>
-                                                    <div className="text-[11px] text-white/35">{item.groupArtist} · {item.groupChildCount} 个分P</div>
+                                                    <div className="text-[14px] font-semibold text-emerald-100/90 truncate">{item.groupTitle}</div>
+                                                    <div className="text-[12px] text-white/35">{item.groupArtist} · {item.groupChildCount} 个分P</div>
                                                 </div>
                                                 <div className="shrink-0 text-white/30 text-xs px-2">
                                                     {isCollapsed ? "▶" : "▼"}
@@ -1070,7 +1093,7 @@ const PlaylistPanel = React.memo(({
                                                 else onPlay(index);
                                             }}
                                             className={`
-                                     absolute left-0 right-0 h-[66px]
+                                     absolute left-0 right-0 h-[102px]
                                      group flex items-center gap-3 p-2 mx-2 rounded-2xl cursor-pointer transition-all duration-200
                                      ${isEditing ? 'hover:bg-white/10' : isCurrent ? 'bg-white/10 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]' : 'hover:bg-white/5'}
                                      ${isDrag ? 'opacity-0 scale-[0.98]' : ''}
@@ -1124,7 +1147,7 @@ const PlaylistPanel = React.memo(({
                                                             style={{ color: isCurrent ? accentColor : 'rgba(255,255,255,0.9)' }}>
                                                             {song.title}
                                                         </div>
-                                                        <div className="text-[13px] text-white/50 truncate font-medium">
+                                                        <div className="text-[14px] text-white/50 truncate font-medium">
                                                             {song.artist}
                                                         </div>
                                                     </div>
@@ -1203,7 +1226,7 @@ const PlaylistPanel = React.memo(({
                                                 </button>
                                             )}
                                             {/* Drag handle - far right */}
-                                            {!isEditing && !smartViewActive && (
+                                            {!isEditing && reorderAvailable && (
                                                 <button
                                                     type="button"
                                                     title={dict.list.drag}

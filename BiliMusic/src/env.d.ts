@@ -41,6 +41,8 @@ declare module "jsmediatags/dist/jsmediatags.min.js" {
   export default jsmediatags;
 }
 
+declare const __APP_VERSION__: string;
+
 interface Window {
   electronAPI?: {
     openFileDialog: () => Promise<string[]>;
@@ -51,12 +53,17 @@ interface Window {
       maximize: () => Promise<void>;
       close: () => Promise<void>;
       isMaximized: () => Promise<boolean>;
+      getPosition: () => Promise<[number, number]>;
+      moveTo: (x: number, y: number) => Promise<void>;
       onMaximizeChange: (callback: (value: boolean) => void) => () => void;
     };
     download: {
       audio: (url: string, title: string) => Promise<unknown>;
       onProgress: (callback: (data: unknown) => void) => () => void;
       onDone: (callback: (data: unknown) => void) => () => void;
+    };
+    cache?: {
+      clear: () => Promise<void>;
     };
     bili: {
       getLoginStatus: () => Promise<import("./types").BilibiliLoginStatus>;

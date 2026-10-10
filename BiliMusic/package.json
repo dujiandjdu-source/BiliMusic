@@ -1,16 +1,17 @@
 {
   "name": "bili-music",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.8",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "check": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit && npm test && vite build",
+    "test": "node --test tools/tests/*.test.cjs",
     "check:bili": "electron tools/check-bilibili.cjs",
     "qmc:decode": "node tools/decode-qmc.cjs",
-    "pack": "vite build && electron-builder --win --x64",
-    "pack:portable": "vite build && electron-builder --win portable --x64",
+    "pack": "npm run check && electron-builder --win --x64",
+    "pack:portable": "npm run check && electron-builder --win portable --x64",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -18,7 +19,7 @@
     "@react-spring/web": "^10.0.3",
     "colorthief": "^3.3.1",
     "electron-updater": "^6.8.9",
-    "fast-xml-parser": "^5.9.3",
+    "fast-xml-parser": "^5.10.1",
     "jsmediatags": "^3.9.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

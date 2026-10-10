@@ -101,6 +101,9 @@ function startLoop() {
 
 // State for bar smoothing
 let bars: number[] = [];
+let recentData = new Float32Array(0);
+let targetBars: number[] = [];
+let smoothedTarget: number[] = [];
 
 function draw(ctx: OffscreenCanvasRenderingContext2D, width: number, height: number) {
     ctx.clearRect(0, 0, width, height);
@@ -112,11 +115,15 @@ function draw(ctx: OffscreenCanvasRenderingContext2D, width: number, height: num
     // Initialize bars if needed
     if (bars.length !== barCount) {
         bars = new Array(barCount).fill(0);
+        targetBars = new Array(barCount).fill(0);
+        smoothedTarget = new Array(barCount).fill(0);
     }
 
     // Analyze audio data
     const size = Math.max(256, Math.min(fftSize, BUFFER_SIZE));
-    const recentData = new Float32Array(size);
+    if (recentData.length !== size) {
+        recentData = new Float32Array(size);
+    }
 
     // Copy recent data from ring buffer
     for (let i = 0; i < size; i++) {
@@ -130,7 +137,6 @@ function draw(ctx: OffscreenCanvasRenderingContext2D, width: number, height: num
     // We use the full step for accuracy (no sparse sampling).
 
     const step = Math.max(1, Math.floor(size / barCount));
-    let targetBars = new Array(barCount).fill(0);
 
     for (let i = 0; i < barCount; i++) {
         let maxVal = 0;
@@ -150,7 +156,6 @@ function draw(ctx: OffscreenCanvasRenderingContext2D, width: number, height: num
 
     // Apply Savitzky-Golay Smoothing (Window Size 7)
     // "Front that one and last that one not needed anymore" -> Skip smoothing for edges
-    const smoothedTarget = new Array(barCount).fill(0);
     for (let i = 0; i < barCount; i++) {
         if (i < 3 || i >= barCount - 3) {
             smoothedTarget[i] = targetBars[i];
@@ -167,7 +172,6 @@ function draw(ctx: OffscreenCanvasRenderingContext2D, width: number, height: num
             smoothedTarget[i] = Math.max(0, val);
         }
     }
-    targetBars = smoothedTarget;
 
     const effectiveHeight = height / dpr;
     const effectiveWidth = width / dpr;
@@ -178,7 +182,7 @@ function draw(ctx: OffscreenCanvasRenderingContext2D, width: number, height: num
     // Smooth the bars temporally
     for (let i = 0; i < barCount; i++) {
         const factor = 0.15;
-        bars[i] += (targetBars[i] - bars[i]) * factor;
+        bars[i] += (smoothedTarget[i] - bars[i]) * factor;
     }
 
     // Draw small rounded bars (cylinders)

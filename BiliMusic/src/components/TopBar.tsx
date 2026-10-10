@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { SearchIcon, LocalMusicIcon, SettingsIcon } from "./Icons";
+import { useWindowDrag } from "../hooks/useWindowDrag";
 
 interface TopBarProps {
   onFilesSelected: (files: FileList) => void;
@@ -14,6 +15,7 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
   const [isMaximized, setIsMaximized] = useState(false);
   const [hover, setHover] = useState(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const windowDrag = useWindowDrag();
 
   const isVideo = appMode === "video";
   const showSidebar = hover || isVideo;
@@ -56,6 +58,13 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
         onMouseEnter={handleMouseEnter}
       />
 
+      {/* 无边框窗口的拖拽区域，避开侧栏的悬停检测 */}
+      {!isVideo && <div
+        className="fixed top-0 left-12 right-0 h-8 z-[998] nodrag"
+        aria-hidden="true"
+        {...windowDrag}
+      />}
+
       {/* 侧边栏 */}
       <div
         className={`fixed top-0 left-0 bottom-0 w-12 z-[999] transition-all duration-200 ease-out ${
@@ -66,7 +75,7 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        <div className="h-full w-full flex flex-col items-center py-3 gap-1 bg-black/60 backdrop-blur-xl border-r border-white/5 drag">
+        <div {...windowDrag} className="h-full w-full flex flex-col items-center py-3 gap-1 bg-black/60 backdrop-blur-xl border-r border-white/5 nodrag">
           <div className="mb-2 text-white/50 text-[10px] font-medium tracking-widest nodrag" style={{ writingMode: "vertical-rl" }}>
             BiliMusic
           </div>

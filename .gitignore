@@ -13,3 +13,8 @@ BiliMusic/.vite/
 __pycache__/
 *.pyc
 BiliMusic/TODO.txt
+
+# Local workspace configuration, music and personal image assets
+.claude/
+Music/
+steinsgate_images/

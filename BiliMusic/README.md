@@ -207,6 +207,16 @@ npm run qmc:decode -- <文件路径> [--key=<密钥>]
 
 ## 开发者指南
 
+### 修改与回归验证
+
+在 `BiliMusic` 目录运行 `npm test` 执行核心逻辑回归测试；运行 `npm run check` 依次完成类型检查、回归测试和生产构建。测试不依赖在线音乐服务或登录账号。
+
+桌面验收脚本 `tools/check-desktop.cjs` 使用 Playwright 和项目内 Electron，在独立临时资料目录验证窗口拖动、侧栏、最大化恢复、视频工具栏、版本显示、本地播放与重启恢复。运行 `node tools/check-desktop.cjs <Playwright 模块路径> [应用目录或 app.asar 路径]`；省略应用目录时检查当前生产构建。脚本不使用现有用户音乐库或登录资料。便携版打包命令会先执行完整 `check`，版本号应在构建前更新。
+
+歌曲创建统一使用 `src/services/songFactory.ts`，显示名称规则集中在 `songMetadata.ts`，去重规则集中在 `songIdentity.ts`。修改标题时保留 `originalTitle`；B 站合集名使用 `biliVideoTitle`，避免从曲名推测合集名。网络搜索统一使用 `usePaginatedSearch`，队列变更统一经过 `useQueueState`，避免旧请求或旧队列覆盖最新状态。
+
+自动化测试覆盖核心状态与输入边界；在线音源可用性、账号登录和安装包启动还需实际验证。
+
 ### 环境要求
 
 - Node.js 18+

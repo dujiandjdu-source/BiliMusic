@@ -313,6 +313,34 @@ const searchVideos = async (ses, keyword, page = 1, pageSize = 20) => {
   };
 };
 
+// Cache resolved audio URLs to avoid repeated API calls (3+ HTTP round-trips per request)
+// Key: bvid+cid+quality, Value: { remoteUrl, expiry }
+const audioUrlCache = new Map();
+const AUDIO_URL_CACHE_TTL = 30 * 60 * 1000; // 30 minutes (B站 URLs typically valid ~1 hour)
+const EXPIRED_AUDIO_STATUSES = new Set([401, 403, 404, 410]);
+
+const getCacheKey = (bvid, cid, quality) => `${bvid}|${cid || ""}|${quality}`;
+
+const getCachedAudioUrl = (bvid, cid, quality) => {
+  const key = getCacheKey(bvid, cid, quality);
+  const entry = audioUrlCache.get(key);
+  if (entry && Date.now() < entry.expiry) {
+    return entry.remoteUrl;
+  }
+  if (entry) audioUrlCache.delete(key);
+  return null;
+};
+
+const setCachedAudioUrl = (bvid, cid, quality, remoteUrl) => {
+  const key = getCacheKey(bvid, cid, quality);
+  audioUrlCache.set(key, { remoteUrl, expiry: Date.now() + AUDIO_URL_CACHE_TTL });
+  // Evict oldest entries if cache grows too large
+  if (audioUrlCache.size > 200) {
+    const firstKey = audioUrlCache.keys().next().value;
+    audioUrlCache.delete(firstKey);
+  }
+};
+
 const registerProtocol = (ses) => {
   protocol.handle("bili-audio", async (request) => {
     try {
@@ -324,15 +352,33 @@ const registerProtocol = (ses) => {
         return new Response("Missing bvid", { status: 400 });
       }
 
-      const audio = await getPlayableAudio(ses, bvid, cid, quality);
+      // Try cache first to skip 3+ API round-trips
+      let remoteUrl = getCachedAudioUrl(bvid, cid, quality);
+      if (!remoteUrl) {
+        const audio = await getPlayableAudio(ses, bvid, cid, quality);
+        remoteUrl = audio.remoteUrl;
+        setCachedAudioUrl(bvid, cid, quality, remoteUrl);
+      }
+
       const headers = requestHeaders();
       const range = request.headers.get("range");
       if (range) headers.Range = range;
 
-      return ses.fetch(audio.remoteUrl, {
+      let response = await ses.fetch(remoteUrl, {
         method: request.method,
         headers,
       });
+      if (EXPIRED_AUDIO_STATUSES.has(response.status)) {
+        audioUrlCache.delete(getCacheKey(bvid, cid, quality));
+        const refreshed = await getPlayableAudio(ses, bvid, cid, quality);
+        remoteUrl = refreshed.remoteUrl;
+        setCachedAudioUrl(bvid, cid, quality, remoteUrl);
+        response = await ses.fetch(remoteUrl, {
+          method: request.method,
+          headers,
+        });
+      }
+      return response;
     } catch (error) {
       return new Response(
         error instanceof Error ? error.message : "Bilibili audio failed",
@@ -487,6 +533,7 @@ module.exports = function registerBilibili(ipc, ses) {
   ipc.handle("bili:audio-url", async (_, bvid, cid, quality = "auto") => {
     try {
       const audio = await getPlayableAudio(ses, bvid, cid, quality);
+      setCachedAudioUrl(bvid, audio.cid, quality, audio.remoteUrl);
       return {
         url: stableAudioUrlWithQuality(bvid, audio.cid, quality),
         cid: audio.cid,

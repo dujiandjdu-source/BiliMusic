@@ -18,7 +18,7 @@ import {
   searchAndMatchLyrics,
   MatchedLyricsResult,
 } from "../services/lyricsService";
-import { audioResourceCache } from "../services/cache";
+import { sameSong, uniqueSongsAgainst } from "../services/songIdentity";
 
 type MatchStatus = "idle" | "matching" | "success" | "failed";
 
@@ -54,24 +54,31 @@ export const usePlayer = ({
   updateSongInQueue,
   setQueue,
 }: UsePlayerParams) => {
-  const savedRef = useRef(loadPlaybackSnapshot());
+  const [savedPlayback] = useState(loadPlaybackSnapshot);
+  const savedRef = useRef(savedPlayback);
   const restoredRef = useRef(false);
   const songRef = useRef<string | null>(savedRef.current.songId);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [playState, setPlayState] = useState<PlayState>(PlayState.PAUSED);
+  const playStateRef = useRef<PlayState>(PlayState.PAUSED);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playMode, setPlayMode] = useState<PlayMode>(savedRef.current.playMode);
   const [matchStatus, setMatchStatus] = useState<MatchStatus>("idle");
   const [speed, setSpeed] = useState(1);
   const [preservesPitch, setPreservesPitch] = useState(true);
-  const [resolvedAudioSrc, setResolvedAudioSrc] = useState<string | null>(null);
   const [isBuffering, setIsBuffering] = useState(false);
   const [bufferProgress, setBufferProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const isSeekingRef = useRef(false);
   const poolRef = useRef<string[]>([]);
   const pastRef = useRef<string[]>([]);
+  const playRequestRef = useRef(0);
+
+  // Keep playStateRef in sync with playState
+  useEffect(() => {
+    playStateRef.current = playState;
+  }, [playState]);
 
   const applyAudio = useCallback(() => {
     const audio = audioRef.current as (HTMLAudioElement & {
@@ -87,17 +94,35 @@ export const usePlayer = ({
   }, [preservesPitch, speed]);
 
   const pauseAndResetCurrentAudio = useCallback(() => {
+    playRequestRef.current += 1;
     if (!audioRef.current) return;
     audioRef.current.pause();
     audioRef.current.currentTime = 0;
   }, []);
 
+  const primeNeteaseMeta = useCallback((song?: Song) => {
+    const songId = song?.neteaseId || (song?.isNetease ? song.id : "");
+    if (!song || !songId) return;
+
+    const request = window.electronAPI?.netease?.setMeta(
+      songId,
+      song.title,
+      song.artist,
+    );
+    void request?.catch((error) => {
+      console.warn("Failed to prime Netease metadata", error);
+    });
+  }, []);
+
   const setIndex = useCallback(
     (index: number, list: Song[] = queue) => {
-      songRef.current = index >= 0 ? list[index]?.id ?? null : null;
+      const song = index >= 0 ? list[index] : undefined;
+      primeNeteaseMeta(song);
+      if (songRef.current !== (song?.id ?? null)) playRequestRef.current += 1;
+      songRef.current = song?.id ?? null;
       setCurrentIndex(index);
     },
-    [queue],
+    [primeNeteaseMeta, queue],
   );
 
   const currentSong =
@@ -106,6 +131,7 @@ export const usePlayer = ({
       : null) ??
     queue[currentIndex] ??
     null;
+  const resolvedAudioSrc = currentSong?.fileUrl || null;
   const accentColor = currentSong?.colors?.[0] || "#a855f7";
   const idsKey = queue.map((song) => song.id).join("\n");
 
@@ -161,15 +187,26 @@ export const usePlayer = ({
     async (reason: string) => {
       const audio = audioRef.current;
       if (!audio) return false;
+      const request = ++playRequestRef.current;
+      const source = audio.src;
+      const songId = songRef.current;
 
       try {
         applyAudio();
         await audio.play();
+        if (request !== playRequestRef.current || source !== audio.src || songId !== songRef.current || audio.paused) return false;
         setPlayState(PlayState.PLAYING);
+        playStateRef.current = PlayState.PLAYING;
         return true;
-      } catch (err) {
+      } catch (err: any) {
+        if (request !== playRequestRef.current || source !== audio.src || songId !== songRef.current) return false;
+        // AbortError means a newer play() interrupted this one — not a real failure
+        if (err?.name === "AbortError") {
+          return false;
+        }
         console.error(`${reason} failed`, err);
         setPlayState(PlayState.PAUSED);
+        playStateRef.current = PlayState.PAUSED;
         return false;
       }
     },
@@ -179,7 +216,9 @@ export const usePlayer = ({
   const togglePlay = useCallback(() => {
     if (!audioRef.current) return;
     if (playState === PlayState.PLAYING) {
+      playRequestRef.current += 1;
       audioRef.current.pause();
+      playStateRef.current = PlayState.PAUSED;
       setPlayState(PlayState.PAUSED);
     } else {
       const duration = audioRef.current.duration || 0;
@@ -199,7 +238,9 @@ export const usePlayer = ({
 
   const pause = useCallback(() => {
     if (!audioRef.current) return;
+    playRequestRef.current += 1;
     audioRef.current.pause();
+    playStateRef.current = PlayState.PAUSED;
     setPlayState(PlayState.PAUSED);
   }, []);
 
@@ -239,12 +280,9 @@ export const usePlayer = ({
     applyAudio();
     const value = audioRef.current.duration;
     setDuration(Number.isFinite(value) ? value : 0);
-    if (playState === PlayState.PLAYING) {
-      audioRef.current
-        .play()
-        .catch((err) => console.error("Auto-play failed", err));
-    }
-  }, [applyAudio, playState]);
+    // Don't call play() here — the dedicated auto-play effect handles all playback
+    // triggering via canplay/loadedmetadata events to avoid double-play race conditions.
+  }, [applyAudio]);
 
   useEffect(() => {
     isSeekingRef.current = false;
@@ -291,7 +329,7 @@ export const usePlayer = ({
   const playNext = useCallback(() => {
     if (queue.length === 0) return;
 
-    if (playMode === PlayMode.LOOP_ONE) {
+    if (playMode === PlayMode.LOOP_ONE || queue.length === 1) {
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
         void playAudioElement("Loop-one play next");
@@ -343,6 +381,11 @@ export const usePlayer = ({
     if (queue.length === 0) return;
     pauseAndResetCurrentAudio();
 
+    if (queue.length === 1) {
+      void playAudioElement("Single-song play previous");
+      return;
+    }
+
     if (playMode === PlayMode.SHUFFLE) {
       const prevId = pastRef.current.pop();
       const currId = currentSong?.id ?? null;
@@ -352,7 +395,7 @@ export const usePlayer = ({
           audioRef.current.currentTime = 0;
         }
         setMatchStatus("idle");
-        setPlayState(PlayState.PLAYING);
+        void playAudioElement("Shuffle replay without history");
         return;
       }
 
@@ -385,12 +428,18 @@ export const usePlayer = ({
     pauseAndResetCurrentAudio,
     setIndex,
     currentSong?.id,
+    playAudioElement,
   ]);
 
   const playIndex = useCallback(
     (index: number) => {
       if (index < 0 || index >= queue.length) return;
       pauseAndResetCurrentAudio();
+
+      if (queue[index]?.id === currentSong?.id) {
+        void playAudioElement("Replay selected song");
+        return;
+      }
 
       if (playMode === PlayMode.SHUFFLE) {
         const nextId = queue[index]?.id;
@@ -409,7 +458,7 @@ export const usePlayer = ({
       setPlayState(PlayState.PLAYING);
       setMatchStatus("idle");
     },
-    [queue, playMode, pauseAndResetCurrentAudio, setIndex, currentSong?.id],
+    [queue, playMode, pauseAndResetCurrentAudio, setIndex, currentSong?.id, playAudioElement],
   );
 
   const handleAudioEnded = useCallback(() => {
@@ -435,24 +484,23 @@ export const usePlayer = ({
         pastRef.current.push(currentSong.id);
       }
 
-      setQueue((prev) => {
-        const next = [...prev, song];
-        poolRef.current = poolRef.current.filter((id) => id !== song.id);
-        setIndex(next.length - 1, next);
-        setPlayState(PlayState.PLAYING);
-        setMatchStatus("idle");
-        return next;
-      });
+      const selected = queue.find((item) => sameSong(item, song)) || song;
+      setQueue((prev) => [...prev, ...uniqueSongsAgainst(prev, [selected])]);
+      poolRef.current = poolRef.current.filter((id) => id !== selected.id);
+      const next = queue.some((item) => item.id === selected.id) ? queue : [...queue, selected];
+      setIndex(next.findIndex((item) => item.id === selected.id), next);
+      setPlayState(PlayState.PLAYING);
+      setMatchStatus("idle");
     },
-    [playMode, currentSong?.id, setIndex, setQueue],
+    [playMode, currentSong?.id, queue, setIndex, setQueue],
   );
 
   const handlePlaylistAddition = useCallback(
     (added: Song[], wasEmpty: boolean) => {
       if (added.length === 0) return;
       setMatchStatus("idle");
-      if (wasEmpty || currentIndex === -1) {
-        setIndex(0);
+      if (!songRef.current && (wasEmpty || currentIndex === -1)) {
+        setIndex(0, added);
         setPlayState(PlayState.PLAYING);
       }
     },
@@ -586,21 +634,57 @@ export const usePlayer = ({
     };
   }, [currentSong?.id, mergeLyricsWithMetadata, updateSongInQueue]);
 
+  // Error retry state — use ref so it persists across re-renders
+  const errorRetryRef = useRef(0);
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    const MAX_RETRIES = 2;
+
     const handleAudioError = () => {
-      console.warn("Audio playback error detected");
+      const error = audio.error;
+      const code = error?.code ?? 0;
+      // MEDIA_ERR_ABORTED(1) = user aborted, not a real error
+      if (code === 1) return;
+
+      console.warn(
+        `Audio error (code=${code}, retry=${errorRetryRef.current}):`,
+        error?.message || "Unknown error",
+      );
+
+      // For network/decode errors, retry by reloading the same source
+      if (errorRetryRef.current < MAX_RETRIES && (code === 2 || code === 3) && audio.src) {
+        errorRetryRef.current++;
+        // Force reload without clearing src — avoids race with source resolution effect
+        audio.load();
+        if (playStateRef.current === PlayState.PLAYING) {
+          audio.play().catch(() => {});
+        }
+        return;
+      }
+
+      // Exhausted retries or unrecoverable error
       audio.pause();
       audio.currentTime = 0;
       setPlayState(PlayState.PAUSED);
+      playStateRef.current = PlayState.PAUSED;
       setCurrentTime(0);
+      setDuration(0);
+      errorRetryRef.current = 0;
+    };
+
+    const handleCanPlay = () => {
+      // Reset retry count when audio can play successfully
+      errorRetryRef.current = 0;
     };
 
     audio.addEventListener("error", handleAudioError);
+    audio.addEventListener("canplay", handleCanPlay);
     return () => {
       audio.removeEventListener("error", handleAudioError);
+      audio.removeEventListener("canplay", handleCanPlay);
     };
   }, [audioRef]);
 
@@ -705,7 +789,10 @@ export const usePlayer = ({
         return;
       }
 
-      songRef.current = queue[currentIndex]?.id ?? null;
+      const replacement = Math.max(0, Math.min(queue.length - 1, currentIndex));
+      setIndex(replacement);
+      setMatchStatus("idle");
+      return;
     }
 
     if (currentIndex >= queue.length || !queue[currentIndex]) {
@@ -723,15 +810,44 @@ export const usePlayer = ({
     setPreservesPitch((prev) => !prev);
   }, []);
 
-  // Trigger play when a new song is selected while playState is PLAYING
+  // Trigger auto-play when audio source resolves and playState is PLAYING.
+  // Uses canplay event as primary trigger for reliability with slow protocols.
   useEffect(() => {
-    if (!audioRef.current || !currentSong?.id || playState !== PlayState.PLAYING) return;
     const audio = audioRef.current;
-    // If audio already has a valid src and is paused, play it
-    if (audio.src && audio.paused && audio.readyState >= 2) {
-      void playAudioElement("Auto-play on song change");
+    if (
+      !audio ||
+      !currentSong?.id ||
+      !resolvedAudioSrc ||
+      playState !== PlayState.PLAYING
+    ) {
+      return;
     }
-  }, [currentSong?.id, playState, playAudioElement]);
+
+    let playRequested = false;
+
+    const tryAutoPlay = () => {
+      if (playRequested || playStateRef.current !== PlayState.PLAYING) return;
+      if (audio.paused && audio.readyState >= 1) {
+        playRequested = true;
+        void playAudioElement("Auto-play on source change");
+      }
+    };
+
+    // Try immediately if audio is already ready enough
+    if (audio.readyState >= 1 && audio.paused) {
+      tryAutoPlay();
+    }
+
+    // Listen for canplay — fires when enough data is available to start playback
+    audio.addEventListener("canplay", tryAutoPlay, { once: true });
+    // Also listen for loadedmetadata as a fallback for fast-loading sources
+    audio.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
+
+    return () => {
+      audio.removeEventListener("canplay", tryAutoPlay);
+      audio.removeEventListener("loadedmetadata", tryAutoPlay);
+    };
+  }, [currentSong?.fileUrl, currentSong?.id, playAudioElement, playState, resolvedAudioSrc]);
 
   // Re-apply playback settings whenever state or source changes.
   useEffect(() => {
@@ -739,138 +855,34 @@ export const usePlayer = ({
   }, [applyAudio, currentSong?.id, playState, resolvedAudioSrc]);
 
 
+  // The media element owns loading. Observe its state instead of copying its src
+  // into React state or downloading the same audio a second time.
   useEffect(() => {
-    let canceled = false;
-    let currentObjectUrl: string | null = null;
-    let controller: AbortController | null = null;
-
-    const releaseObjectUrl = () => {
-      if (currentObjectUrl) {
-        URL.revokeObjectURL(currentObjectUrl);
-        currentObjectUrl = null;
+    const audio = audioRef.current;
+    setIsBuffering(false);
+    setBufferProgress(0);
+    if (!audio) return;
+    const waiting = () => setIsBuffering(!audio.paused);
+    const ready = () => setIsBuffering(false);
+    const progress = () => {
+      const value = audio.duration;
+      if (Number.isFinite(value) && value > 0 && audio.buffered?.length) {
+        setBufferProgress(Math.min(1, audio.buffered.end(audio.buffered.length - 1) / value));
       }
     };
-
-    if (!currentSong?.fileUrl) {
-      releaseObjectUrl();
-      setResolvedAudioSrc(null);
-      setIsBuffering(false);
-      setBufferProgress(0);
-      return () => {
-        canceled = true;
-        controller?.abort();
-        releaseObjectUrl();
-      };
-    }
-
-    const fileUrl = currentSong.fileUrl;
-
-    // Already a blob or data URL - use directly
-    if (fileUrl.startsWith("blob:") || fileUrl.startsWith("data:")) {
-      releaseObjectUrl();
-      setResolvedAudioSrc(fileUrl);
-      setIsBuffering(false);
-      setBufferProgress(1);
-      return () => {
-        canceled = true;
-      };
-    }
-
-    const keepPlayingAfterSourceChange = () => {
-      if (playState === PlayState.PLAYING) {
-        window.setTimeout(() => {
-          void playAudioElement("Auto-play after audio source update");
-        }, 0);
-      }
-    };
-
-    const useObjectUrl = (blob: Blob) => {
-      releaseObjectUrl();
-      currentObjectUrl = URL.createObjectURL(blob);
-      setResolvedAudioSrc(currentObjectUrl);
-      setIsBuffering(false);
-      setBufferProgress(1);
-      keepPlayingAfterSourceChange();
-    };
-
-    const useDirectUrlFallback = (error: unknown) => {
-      console.error("Audio cache fetch failed, falling back to direct URL", error);
-      releaseObjectUrl();
-      setResolvedAudioSrc(fileUrl);
-      setIsBuffering(false);
-      setBufferProgress(0);
-      keepPlayingAfterSourceChange();
-    };
-
-    // Check cache first
-    const cachedBlob = audioResourceCache.get(fileUrl);
-    if (cachedBlob) {
-      useObjectUrl(cachedBlob);
-      return () => {
-        canceled = true;
-        releaseObjectUrl();
-      };
-    }
-
-    const cacheInBackground = async () => {
-      controller = new AbortController();
-      setResolvedAudioSrc(null);
-      setIsBuffering(true);
-      setBufferProgress(0);
-
-      try {
-        const response = await fetch(fileUrl, { signal: controller.signal });
-        if (!response.ok) {
-          throw new Error(`Audio request failed with status ${response.status}`);
-        }
-
-        const contentLength = Number(response.headers.get("content-length") || 0);
-        const reader = response.body?.getReader();
-
-        if (!reader) {
-          const blob = await response.blob();
-          if (canceled) return;
-          audioResourceCache.set(fileUrl, blob);
-          useObjectUrl(blob);
-          return;
-        }
-
-        const chunks: Uint8Array[] = [];
-        let received = 0;
-
-        while (!canceled) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (!value) continue;
-
-          chunks.push(value);
-          received += value.byteLength;
-          if (contentLength > 0) {
-            setBufferProgress(Math.min(received / contentLength, 0.98));
-          }
-        }
-
-        if (canceled) return;
-
-        const blob = new Blob(chunks, {
-          type: response.headers.get("content-type") || "audio/mpeg",
-        });
-        audioResourceCache.set(fileUrl, blob);
-        useObjectUrl(blob);
-      } catch (error) {
-        if (canceled || controller?.signal.aborted) return;
-        useDirectUrlFallback(error);
-      }
-    };
-
-    void cacheInBackground();
-
+    audio.addEventListener("waiting", waiting);
+    audio.addEventListener("stalled", waiting);
+    for (const event of ["playing", "canplay", "pause", "error", "ended"]) audio.addEventListener(event, ready);
+    audio.addEventListener("progress", progress);
+    audio.addEventListener("loadedmetadata", progress);
     return () => {
-      canceled = true;
-      controller?.abort();
-      releaseObjectUrl();
+      audio.removeEventListener("waiting", waiting);
+      audio.removeEventListener("stalled", waiting);
+      for (const event of ["playing", "canplay", "pause", "error", "ended"]) audio.removeEventListener(event, ready);
+      audio.removeEventListener("progress", progress);
+      audio.removeEventListener("loadedmetadata", progress);
     };
-  }, [currentSong?.fileUrl, playAudioElement, playState]);
+  }, [currentSong?.fileUrl]);
 
   return {
     audioRef,

@@ -339,9 +339,9 @@ const makeNeteaseProxyUrl = (id: string, quality = "standard") => {
 
 export const getNeteaseAudioUrl = (id: string, quality = "standard"): string => {
   if (typeof window !== "undefined" && window.electronAPI?.netease) {
-    return makeNeteaseProxyUrl(id, quality);
+    return `netease-audio://${encodeURIComponent(id)}?quality=${encodeURIComponent(quality)}`;
   }
-  return `https://api.qijieya.cn/meting/?type=url&id=${id}`;
+  return makeNeteaseProxyUrl(id, quality);
 };
 
 const fetchTtmlByNeteaseId = async (id: string): Promise<string | null> => {

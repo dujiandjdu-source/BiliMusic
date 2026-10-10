@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     maximize: () => ipcRenderer.invoke("win:maximize"),
     close: () => ipcRenderer.invoke("win:close"),
     isMaximized: () => ipcRenderer.invoke("win:isMaximized"),
+    getPosition: () => ipcRenderer.invoke("win:get-position"),
+    moveTo: (x, y) => ipcRenderer.invoke("win:move-to", x, y),
     onMaximizeChange: (cb) => {
       const fn = (_, v) => cb(v);
       ipcRenderer.on("win:maximizeChange", fn);
@@ -33,6 +35,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   netease: {
     getAudioUrl: (songId, quality) => ipcRenderer.invoke("netease:audio-url", songId, quality),
+    setMeta: (songId, title, artist) => ipcRenderer.invoke("netease:set-meta", songId, title, artist),
+  },
+  cache: {
+    clear: () => ipcRenderer.invoke("cache:clear"),
   },
   /* ---- BrowserView ---- */
   browser: {

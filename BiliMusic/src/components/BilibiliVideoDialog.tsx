@@ -12,6 +12,7 @@ import {
   getVideoAudioUrl,
   getVideoInfo,
 } from "../services/bilibiliService";
+import { createBilibiliSong } from "../services/songFactory";
 import { CloseIcon, PlayIcon, PlusIcon, BilibiliIcon } from "./Icons";
 
 interface BilibiliVideoDialogProps {
@@ -109,24 +110,7 @@ const BilibiliVideoDialog: React.FC<BilibiliVideoDialogProps> = ({
             audioQuality,
           );
           if (!audio?.url) continue;
-          const title = details?.title || video.title;
-          const part = page.part?.trim();
-          const displayTitle =
-            part && pages.length > 1 && part !== title ? `${title} - ${part}` : title;
-          songs.push({
-            id: `bili-${video.bvid}-${audio.cid || page.cid || 0}`,
-            title: displayTitle,
-            artist: details?.author || video.author || "B站 UP主",
-            fileUrl: audio.url,
-            source: "bilibili",
-            audioQuality,
-            coverUrl: details?.pic || video.pic,
-            isBilibili: true,
-            bvid: video.bvid,
-            biliCid: audio.cid || page.cid,
-            upName: details?.author || video.author,
-            needsLyricsMatch: true,
-          });
+          songs.push(createBilibiliSong(details || video, audio, page, audioQuality));
         } catch {
           // skip failed parts
         }
@@ -155,25 +139,7 @@ const BilibiliVideoDialog: React.FC<BilibiliVideoDialogProps> = ({
       throw new Error(audio?.message || "无法获取这个视频的声轨");
     }
 
-    const title = details?.title || video.title;
-    const part = currentPage?.part?.trim();
-    const displayTitle =
-      part && pages.length > 1 && part !== title ? `${title} - ${part}` : title;
-
-    return {
-      id: `bili-${video.bvid}-${audio.cid || currentPage?.cid || 0}`,
-      title: displayTitle,
-      artist: details?.author || video.author || "B站 UP主",
-      fileUrl: audio.url,
-      source: "bilibili",
-      audioQuality,
-      coverUrl: details?.pic || video.pic,
-      isBilibili: true,
-      bvid: video.bvid,
-      biliCid: audio.cid || currentPage?.cid,
-      upName: details?.author || video.author,
-      needsLyricsMatch: true,
-    };
+    return createBilibiliSong(details || video, audio, currentPage, audioQuality);
   }, [audioQuality, currentPage, details, pages.length, video]);
 
   const handleAudioAction = async (nextAction: "play" | "add") => {

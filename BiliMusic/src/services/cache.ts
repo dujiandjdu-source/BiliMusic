@@ -68,22 +68,57 @@ const AUDIO_CACHE_LIMIT = isMobileViewport() ? 100 * 1024 * 1024 : 200 * 1024 * 
 const RAW_IMAGE_CACHE_LIMIT = 50 * 1024 * 1024;
 
 const rawImageCache = createSizeLimitedLRU(RAW_IMAGE_CACHE_LIMIT);
+const pendingImageRequests = new Map<string, Promise<Blob>>();
+let imageCacheGeneration = 0;
 
 export const imageResourceCache = createSizeLimitedLRU(IMAGE_CACHE_LIMIT);
 export const audioResourceCache = createSizeLimitedLRU(AUDIO_CACHE_LIMIT);
+
+export const clearResourceCaches = async () => {
+  imageCacheGeneration += 1;
+  pendingImageRequests.clear();
+  rawImageCache.clear();
+  imageResourceCache.clear();
+  audioResourceCache.clear();
+
+  if (typeof caches !== "undefined") {
+    const cacheNames = await caches.keys();
+    await Promise.all(cacheNames.map((name) => caches.delete(name)));
+  }
+
+  if (typeof window !== "undefined" && window.electronAPI?.cache?.clear) {
+    await window.electronAPI.cache.clear();
+  }
+};
 
 export const fetchImageBlobWithCache = async (url: string): Promise<Blob> => {
   const cached = rawImageCache.get(url);
   if (cached) {
     return cached;
   }
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status}`);
+  const pending = pendingImageRequests.get(url);
+  if (pending) return pending;
+
+  const generation = imageCacheGeneration;
+  const request = (async () => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status}`);
+    }
+    const blob = await response.blob();
+    if (generation === imageCacheGeneration) {
+      rawImageCache.set(url, blob);
+    }
+    return blob;
+  })();
+  pendingImageRequests.set(url, request);
+  try {
+    return await request;
+  } finally {
+    if (pendingImageRequests.get(url) === request) {
+      pendingImageRequests.delete(url);
+    }
   }
-  const blob = await response.blob();
-  rawImageCache.set(url, blob);
-  return blob;
 };
 
 export const loadImageElementWithCache = async (

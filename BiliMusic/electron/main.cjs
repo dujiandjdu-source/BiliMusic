@@ -82,6 +82,11 @@ function createWindow() {
   ipcMain.handle("win:maximize", () => { mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize(); });
   ipcMain.handle("win:close", () => mainWindow.close());
   ipcMain.handle("win:isMaximized", () => mainWindow.isMaximized());
+  ipcMain.handle("win:get-position", (event) => BrowserWindow.fromWebContents(event.sender)?.getPosition() || [0, 0]);
+  ipcMain.handle("win:move-to", (event, x, y) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window && Number.isFinite(x) && Number.isFinite(y) && !window.isMaximized()) window.setPosition(Math.round(x), Math.round(y));
+  });
   mainWindow.on("maximize", () => mainWindow.webContents.send("win:maximizeChange", true));
   mainWindow.on("unmaximize", () => mainWindow.webContents.send("win:maximizeChange", false));
 

@@ -24,6 +24,8 @@ export interface LyricLine {
 export interface Song {
   id: string;
   title: string;
+  originalTitle?: string;
+  biliVideoTitle?: string;
   artist: string;
   fileUrl: string;
   source?: "local" | "remote" | "bilibili";

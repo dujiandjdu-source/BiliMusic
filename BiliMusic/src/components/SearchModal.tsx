@@ -3,11 +3,9 @@ import { createPortal } from "react-dom";
 import { SearchIcon, PlayIcon, PlusIcon } from "./Icons";
 import SmartImage from "./SmartImage";
 import { BilibiliVideoInfo, Song } from "../types";
-import {
-  getNeteaseAudioUrl,
-  NeteaseTrackInfo,
-} from "../services/lyricsService";
+import type { NeteaseTrackInfo } from "../services/lyricsService";
 import { getVideoAudioUrl, getVideoInfo } from "../services/bilibiliService";
+import { createBilibiliSong, createNeteaseSong } from "../services/songFactory";
 import { useI18n } from "../hooks/useI18n";
 import { useKeyboardScope } from "../hooks/useKeyboardScope";
 import { useSearchModal } from "../hooks/useSearchModal";
@@ -73,6 +71,15 @@ const ANIMATION_STYLES = `
   .macos-modal-out { animation: modal-out 0.15s cubic-bezier(0.32, 0.72, 0, 1) forwards; will-change: transform, opacity; }
 `;
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
 const SearchModal: React.FC<SearchModalProps> = ({
   isOpen,
   onClose,
@@ -97,6 +104,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   // Use search modal hook
   const search = useSearchModal({
@@ -111,7 +119,6 @@ const SearchModal: React.FC<SearchModalProps> = ({
     if (isOpen) {
       setIsRendering(true);
       setIsClosing(false);
-      setTimeout(() => inputRef.current?.focus(), 50);
     } else if (isRendering && !isClosing) {
       setIsClosing(true);
       const timer = setTimeout(() => {
@@ -121,6 +128,27 @@ const SearchModal: React.FC<SearchModalProps> = ({
       return () => clearTimeout(timer);
     }
   }, [isOpen, isRendering]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+      const previousFocus = previousFocusRef.current;
+      previousFocusRef.current = null;
+      if (previousFocus?.isConnected) {
+        previousFocus.focus({ preventScroll: true });
+      }
+    };
+  }, [isOpen]);
 
   // --- Close context menu on outside click ---
   useEffect(() => {
@@ -148,10 +176,19 @@ const SearchModal: React.FC<SearchModalProps> = ({
     (e) => {
       if (!isOpen) return false;
 
-      if (search.contextMenu) {
+      if (search.contextMenu && e.key === "Escape") {
+        e.preventDefault();
         search.closeContextMenu();
         return true;
       }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return true;
+      }
+
+      if (e.target !== inputRef.current) return false;
 
       switch (e.key) {
         case "ArrowDown": {
@@ -175,22 +212,35 @@ const SearchModal: React.FC<SearchModalProps> = ({
           }
           return true;
         }
-        case "Escape": {
-          e.preventDefault();
-          onClose();
-          return true;
-        }
-        case "Tab": {
-          e.preventDefault();
-          search.switchTab();
-          return true;
-        }
       }
       return false;
     },
     100,
     isOpen,
   );
+
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return;
+
+    const focusable = Array.from(
+      modalRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [],
+    ).filter((element) => element.getClientRects().length > 0);
+    if (focusable.length === 0) {
+      event.preventDefault();
+      modalRef.current?.focus();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   // --- Actions ---
 
@@ -223,41 +273,11 @@ const SearchModal: React.FC<SearchModalProps> = ({
   };
 
   const playNeteaseTrack = (track: NeteaseTrackInfo) => {
-    const origin = getNeteaseAudioUrl(track.id);
-    const song: Song = {
-      id: track.id,
-      title: track.title,
-      artist: track.artist,
-      coverUrl: track.coverUrl.replace("http:", "https:"),
-      fileUrl: origin,
-      source: "remote",
-      origin,
-      isNetease: true,
-      neteaseId: track.neteaseId,
-      album: track.album,
-      lyrics: [],
-      needsLyricsMatch: true,
-    };
-    onImportAndPlay(song);
+    onImportAndPlay(createNeteaseSong(track));
   };
 
   const addNeteaseToQueue = (track: NeteaseTrackInfo) => {
-    const origin = getNeteaseAudioUrl(track.id);
-    const song: Song = {
-      id: track.id,
-      title: track.title,
-      artist: track.artist,
-      coverUrl: track.coverUrl.replace("http:", "https:"),
-      fileUrl: origin,
-      source: "remote",
-      origin,
-      isNetease: true,
-      neteaseId: track.neteaseId,
-      album: track.album,
-      lyrics: [],
-      needsLyricsMatch: true,
-    };
-    onAddToQueue(song);
+    onAddToQueue(createNeteaseSong(track));
   };
 
   const formatDuration = (seconds: number): string => {
@@ -267,43 +287,30 @@ const SearchModal: React.FC<SearchModalProps> = ({
   };
 
   const addBiliSingleToQueue = async (video: BilibiliVideoInfo) => {
-    const cid = video.pages?.[0]?.cid;
-    const audioUrl = cid ? await getVideoAudioUrl(video.bvid, cid) : null;
-    const song: Song = {
-      id: `bili-${video.bvid}-${cid || 0}`,
-      title: video.title,
-      artist: video.author || "Unknown",
-      coverUrl: video.pic?.replace("http:", "https:"),
-      fileUrl: audioUrl || "",
-      source: "bilibili",
-      isBilibili: true,
-      bvid: video.bvid,
-      biliCid: cid,
-      upName: video.author,
-      lyrics: [],
-    };
-    onAddToQueue(song);
+    try {
+      const info = await getVideoInfo(video.bvid) || video;
+      const page = info.pages?.[0];
+      const audio = await getVideoAudioUrl(video.bvid, page?.cid);
+      if (audio?.url) onAddToQueue(createBilibiliSong(info, audio, page));
+    } catch (error) {
+      console.warn("Failed to add Bilibili audio", error);
+    }
   };
 
   const addBiliAllPartsToQueue = async (video: BilibiliVideoInfo) => {
-    const info = await getVideoInfo(video.bvid);
-    const pages = info?.pages || video.pages || [];
-    for (const page of pages) {
-      const audioUrl = await getVideoAudioUrl(video.bvid, page.cid);
-      const song: Song = {
-        id: `bili-${video.bvid}-${page.cid}`,
-        title: page.part ? `${video.title} - ${page.part}` : video.title,
-        artist: video.author || "Unknown",
-        coverUrl: video.pic?.replace("http:", "https:"),
-        fileUrl: audioUrl || "",
-        source: "bilibili",
-        isBilibili: true,
-        bvid: video.bvid,
-        biliCid: page.cid,
-        upName: video.author,
-        lyrics: [],
-      };
-      onAddToQueue(song);
+    try {
+      const info = await getVideoInfo(video.bvid) || video;
+      const pages = info.pages?.length ? info.pages : [undefined];
+      for (const page of pages) {
+        try {
+          const audio = await getVideoAudioUrl(video.bvid, page?.cid);
+          if (audio?.url) onAddToQueue(createBilibiliSong(info, audio, page));
+        } catch (error) {
+          console.warn("Failed to add Bilibili part", error);
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to read Bilibili video", error);
     }
   };
 
@@ -346,11 +353,23 @@ const SearchModal: React.FC<SearchModalProps> = ({
         text-white
       `}
         ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="search-dialog-title"
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
       >
+        <h2 id="search-dialog-title" className="sr-only">
+          {dict.top.search}
+        </h2>
         {/* Header Area */}
         <div className="flex flex-col px-5 pt-5 pb-3 gap-4 border-b border-white/10 shrink-0 bg-white/5 z-10">
           {/* Animated Tabs */}
-          <div className="relative flex items-center justify-center p-1 rounded-lg self-center w-full max-w-xs mb-1 bg-black/20 backdrop-blur-md shadow-inner">
+          <div
+            className="relative flex items-center justify-center p-1 rounded-lg self-center w-full max-w-xs mb-1 bg-black/20 backdrop-blur-md shadow-inner"
+            role="tablist"
+            aria-label={dict.top.search}
+          >
             {/* Gliding Pill */}
             <div
               className="absolute top-1 bottom-1 rounded-[6px] bg-white/15 shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-all duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]"
@@ -366,6 +385,9 @@ const SearchModal: React.FC<SearchModalProps> = ({
             />
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={search.activeTab === "netease"}
               onClick={() => {
                 search.setActiveTab("netease");
               }}
@@ -377,6 +399,9 @@ const SearchModal: React.FC<SearchModalProps> = ({
               {search.neteaseProvider.label}
             </button>
             <button
+              type="button"
+              role="tab"
+              aria-selected={search.activeTab === "album"}
               onClick={() => {
                 search.setActiveTab("album");
               }}
@@ -388,6 +413,9 @@ const SearchModal: React.FC<SearchModalProps> = ({
               专辑
             </button>
             <button
+              type="button"
+              role="tab"
+              aria-selected={search.activeTab === "bilibili"}
               onClick={() => {
                 search.setActiveTab("bilibili");
               }}
@@ -408,6 +436,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
             <input
               ref={inputRef}
               type="text"
+              aria-label={dict.top.search}
               value={search.query}
               onChange={(e) => {
                 const val = e.target.value;
@@ -474,15 +503,20 @@ const SearchModal: React.FC<SearchModalProps> = ({
                         ref={(el) => {
                           search.itemRefs.current[idx] = el;
                         }}
-                        onClick={() => handleSelection(idx)}
                         onContextMenu={(e) =>
                           search.openContextMenu(e, s, "album")
                         }
                         className={`
-                                        relative z-10 group flex items-center gap-3 p-3 rounded-[10px] cursor-pointer
+                                        relative z-10 group flex items-center rounded-[10px]
                                         ${search.selectedIndex === idx ? "text-white" : "hover:bg-white/5 hover:transition-colors hover:duration-150 text-white/90"}
                                     `}
                       >
+                        <button
+                          type="button"
+                          onClick={() => handleSelection(idx)}
+                          aria-label={`${dict.search.playNow}: ${s.title} — ${s.artist}`}
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                        >
                         <div className="relative w-10 h-10 rounded-[6px] bg-white/5 overflow-hidden shrink-0 shadow-sm group-hover:shadow-lg transition-shadow duration-200">
                           {s.coverUrl ? (
                             <SmartImage
@@ -540,6 +574,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                             <PlayIcon className="w-5 h-5 fill-white/80" />
                           </div>
                         )}
+                        </button>
                       </div>
                     );
                   })}
@@ -616,15 +651,20 @@ const SearchModal: React.FC<SearchModalProps> = ({
                         ref={(el) => {
                           search.itemRefs.current[idx] = el;
                         }}
-                        onClick={() => handleSelection(idx)}
                         onContextMenu={(e) =>
                           search.openContextMenu(e, track, "netease")
                         }
                         className={`
-                                        relative z-10 group flex items-center gap-3 p-3 rounded-[10px] cursor-pointer
+                                        relative z-10 group flex items-center rounded-[10px]
                                         ${search.selectedIndex === idx ? "text-white" : "hover:bg-white/5 hover:transition-colors hover:duration-150 text-white/90"}
                                     `}
                       >
+                        <button
+                          type="button"
+                          onClick={() => handleSelection(idx)}
+                          aria-label={`${dict.search.playNow}: ${track.title} — ${track.artist}`}
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                        >
                         <div className="relative w-10 h-10 rounded-[6px] bg-white/5 overflow-hidden shrink-0 shadow-sm group-hover:shadow-lg transition-shadow duration-200">
                           {track.coverUrl && (
                             <SmartImage
@@ -675,14 +715,16 @@ const SearchModal: React.FC<SearchModalProps> = ({
                             {track.album}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 px-1">
+                        </button>
+                        <div className="flex items-center gap-1 pr-3">
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               addNeteaseToQueue(track);
                             }}
                             className={`
-                                            opacity-0 group-hover:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
+                                            opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
                                             ${search.selectedIndex === idx
                                 ? "border-white/30 text-white/80 bg-white/20"
                                 : "border-white/10 text-white/30 bg-white/5 hover:bg-white/20 hover:text-white/80"
@@ -695,12 +737,13 @@ const SearchModal: React.FC<SearchModalProps> = ({
                           </button>
                           {onCreatePlaylist && (
                             <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onCreatePlaylist(track.title, [track.id]);
                               }}
                               className={`
-                                            opacity-0 group-hover:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
+                                            opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
                                             ${search.selectedIndex === idx
                                   ? "border-white/30 text-white/80 bg-white/20"
                                   : "border-white/10 text-white/30 bg-white/5 hover:bg-white/20 hover:text-white/80"
@@ -814,15 +857,20 @@ const SearchModal: React.FC<SearchModalProps> = ({
                         ref={(el) => {
                           search.itemRefs.current[idx] = el;
                         }}
-                        onClick={() => handleSelection(idx)}
                         onContextMenu={(e) =>
                           search.openContextMenu(e, video, "bilibili")
                         }
                         className={`
-                                        relative z-10 group flex items-center gap-3 p-3 rounded-[10px] cursor-pointer
+                                        relative z-10 group flex items-center rounded-[10px]
                                         ${search.selectedIndex === idx ? "text-white" : "hover:bg-white/5 hover:transition-colors hover:duration-150 text-white/90"}
                                     `}
                       >
+                        <button
+                          type="button"
+                          onClick={() => handleSelection(idx)}
+                          aria-label={`${dict.search.playNow}: ${video.title} — ${video.author || "Bilibili"}`}
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                        >
                         <div className="relative w-14 h-10 rounded-[6px] bg-white/5 overflow-hidden shrink-0 shadow-sm group-hover:shadow-lg transition-shadow duration-200">
                           {video.pic && (
                             <SmartImage
@@ -853,14 +901,16 @@ const SearchModal: React.FC<SearchModalProps> = ({
                             {video.author || "Unknown"}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 px-1">
+                        </button>
+                        <div className="flex items-center gap-1 pr-3">
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               addBiliSingleToQueue(video);
                             }}
                             className={`
-                                            opacity-0 group-hover:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
+                                            opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
                                             ${search.selectedIndex === idx
                                 ? "border-white/30 text-white/80 bg-white/20"
                                 : "border-white/10 text-white/30 bg-white/5 hover:bg-white/20 hover:text-white/80"
@@ -872,12 +922,13 @@ const SearchModal: React.FC<SearchModalProps> = ({
                             +添加
                           </button>
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               addBiliAllPartsToQueue(video);
                             }}
                             className={`
-                                            opacity-0 group-hover:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
+                                            opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-[10px] font-bold px-1.5 py-0.5 rounded border
                                             ${search.selectedIndex === idx
                                 ? "border-white/30 text-white/80 bg-white/20"
                                 : "border-white/10 text-white/30 bg-white/5 hover:bg-white/20 hover:text-white/80"

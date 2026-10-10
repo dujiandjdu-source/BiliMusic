@@ -25,7 +25,7 @@ const AboutDialog: React.FC<AboutDialogProps> = ({ isOpen, onClose }) => {
             <span className="text-2xl font-bold text-white">B</span>
           </div>
           <h3 className="text-white text-xl font-bold mb-1">BiliMusic</h3>
-          <p className="text-white/40 text-xs mb-4">v1.0.0</p>
+          <p className="text-white/40 text-xs mb-4">v{__APP_VERSION__}</p>
           <p className="text-white/60 text-sm leading-relaxed">
             Apple Music 风格桌面播放器<br />
             支持本地音乐 + B站音轨

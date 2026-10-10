@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -31,6 +31,14 @@ module.exports = function (ipc) {
     data[k] = v;
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify(data));
+    return true;
+  });
+
+  ipc.handle("cache:clear", async () => {
+    await Promise.all([
+      session.defaultSession.clearCache(),
+      session.fromPartition("persist:bilibili").clearCache(),
+    ]);
     return true;
   });
 
