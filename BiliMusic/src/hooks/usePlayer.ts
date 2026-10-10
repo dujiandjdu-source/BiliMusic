@@ -19,7 +19,7 @@ import {
   MatchedLyricsResult,
 } from "../services/lyricsService";
 import { sameSong, uniqueSongsAgainst } from "../services/songIdentity";
-import { cancelAudioTransition, getAudioEngine, prepareAudioTransition, stopAudioEngine } from '../services/audioEngine';
+import { cancelAudioTransition, getAudioEngine, peekAudioEngine, prepareAudioTransition, stopAudioEngine } from '../services/audioEngine';
 
 type MatchStatus = "idle" | "matching" | "success" | "failed";
 
@@ -212,7 +212,10 @@ export const usePlayer = ({
         // Retry only on an explicit play action; never loop on unavailable tracks.
         if (audio.error) audio.load();
         applyAudio();
-        getAudioEngine(audio)?.resume();
+        const engine = reason.startsWith('Auto-play') ? peekAudioEngine(audio) : getAudioEngine(audio);
+        // MediaElementAudioSourceNode takes ownership of the element's output.
+        // Wait for Chromium to resume the shared context before starting audio.
+        if (engine && !(await engine.resume())) throw new Error("Audio output context is unavailable");
         await audio.play();
         if (request !== playRequestRef.current || source !== audio.src || songId !== songRef.current || audio.paused) return false;
         setPlayState(PlayState.PLAYING);
@@ -299,7 +302,7 @@ export const usePlayer = ({
     const value = audioRef.current.currentTime;
     setCurrentTime(Number.isFinite(value) ? value : 0);
     const audio = audioRef.current;
-    const seconds = getAudioEngine(audio)?.graph.settings.crossfadeSeconds ?? 0;
+    const seconds = peekAudioEngine(audio)?.graph.settings.crossfadeSeconds ?? 0;
     if (allowCrossfade && seconds > 0 && advanceRef.current.enabled && !audio.paused &&
         Number.isFinite(audio.duration) && audio.duration > seconds * 2 &&
         audio.duration - value > 0 && audio.duration - value <= seconds && fadedVisitRef.current !== playVisitRef.current) {
@@ -579,9 +582,9 @@ export const usePlayer = ({
 
       const parsed = hasTtml
         ? parseLyrics(result.ttml!)
-        : parseLyrics(result.lrc ?? "", result.tLrc, {
-            yrcContent: result.yrc,
-          });
+        : result.yrc?.trim()
+          ? parseLyrics(result.yrc, result.tLrc)
+          : parseLyrics(result.lrc ?? "", result.tLrc);
 
       const metadataCount = result.metadata.length;
       const metadataLines = result.metadata.map((text, idx) => ({
@@ -695,7 +698,7 @@ export const usePlayer = ({
           }
         } else {
           const result = await withTimeout(
-            searchAndMatchLyrics(songTitle, songArtist),
+            searchAndMatchLyrics(songTitle, songArtist, Number.isFinite(audioRef.current?.duration) ? audioRef.current?.duration : undefined),
             MATCH_TIMEOUT_MS,
           );
           if (cancelled || request !== lyricsRequestRef.current) return;

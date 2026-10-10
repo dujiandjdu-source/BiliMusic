@@ -59,6 +59,33 @@ export interface NeteaseTrackInfo {
   neteaseId: string;
 }
 
+const normalizeMatchText = (value: string): string => value
+  .toLowerCase()
+  .replace(/[\u3010\u3011\[\]（）()【】「」《》“”"'’`]/g, " ")
+  .replace(/\b(feat\.?|ft\.?|with)\b.*$/i, "")
+  .replace(/[^\p{L}\p{N}]+/gu, "")
+  .trim();
+
+const overlapScore = (left: string, right: string): number => {
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  if (left.includes(right) || right.includes(left)) return 0.8;
+  const leftSet = new Set(Array.from(left));
+  const rightSet = new Set(Array.from(right));
+  return Array.from(rightSet).filter(char => leftSet.has(char)).length / Math.max(leftSet.size, rightSet.size, 1);
+};
+
+const scoreLyricCandidate = (candidate: NeteaseTrackInfo, title: string, artist: string, duration?: number): number => {
+  const titleScore = overlapScore(normalizeMatchText(candidate.title), normalizeMatchText(title));
+  const artistScore = overlapScore(normalizeMatchText(candidate.artist), normalizeMatchText(artist));
+  const durationSeconds = Number(duration || 0) > 1000 ? Number(duration) / 1000 : Number(duration || 0);
+  const candidateSeconds = Number(candidate.duration || 0) / 1000;
+  const durationScore = durationSeconds > 0 && candidateSeconds > 0
+    ? Math.max(0, 1 - Math.abs(durationSeconds - candidateSeconds) / Math.max(durationSeconds, candidateSeconds))
+    : 0;
+  return titleScore * 0.62 + artistScore * 0.28 + durationScore * 0.1;
+};
+
 type SearchOptions = {
   limit?: number;
   offset?: number;
@@ -452,6 +479,7 @@ export const fetchNeteaseSong = async (
 export const searchAndMatchLyrics = async (
   title: string,
   artist: string,
+  duration?: number,
 ): Promise<MatchedLyricsResult | null> => {
   try {
     const songs = await searchNetEase(`${title} ${artist}`, { limit: 5 });
@@ -461,7 +489,15 @@ export const searchAndMatchLyrics = async (
       return null;
     }
 
-    const songId = songs[0].id;
+    const ranked = songs
+      .map((song) => ({ song, score: scoreLyricCandidate(song, title, artist, duration) }))
+      .sort((a, b) => b.score - a.score);
+    const best = ranked[0];
+    if (!best || (best.score < 0.34 && songs.length > 1)) {
+      console.warn("No reliable lyric candidate", ranked.slice(0, 3).map(item => ({ id: item.song.id, score: item.score })));
+      return null;
+    }
+    const songId = best.song.id;
     console.log(`Found Song ID: ${songId}`);
 
     const lyricsResult = await fetchLyricsById(songId);

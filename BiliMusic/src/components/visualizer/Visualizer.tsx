@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { publishAudioLevel } from "@/services/audioLevelBridge";
 import audioProcessorUrl from "./AudioProcessor.ts?worker&url";
-import { getAudioEngine } from '../../services/audioEngine';
+import { peekAudioEngine } from '../../services/audioEngine';
 
 interface VisualizerProps {
     audioRef: React.RefObject<HTMLAudioElement>;
@@ -30,7 +30,7 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
         let output: AudioNode | null = null;
         const initAudio = async () => {
             if (!audioRef.current) return;
-            const engine = getAudioEngine(audioRef.current);
+            const engine = peekAudioEngine(audioRef.current);
             if (!engine) return;
             engine.resume();
             try {

@@ -83,8 +83,11 @@ export class AudioEngine {
     this.graph.configure(settings);
     if (!this.graph.settings.crossfadeSeconds) this.cancelTransition();
   }
-  resume() {
-    if (this.context.state === 'suspended') void this.context.resume().catch(() => {});
+  async resume(): Promise<boolean> {
+    if (this.context.state === 'suspended') {
+      try { await this.context.resume(); } catch { return false; }
+    }
+    if (this.context.state !== 'running') return false;
     if (this.monitor === undefined) this.monitor = setInterval(() => {
       if (this.audio.paused && !this.outgoing) return;
       this.graph.analyser.getFloatTimeDomainData(this.samples);
@@ -92,6 +95,7 @@ export class AudioEngine {
       for (const value of this.samples) { sum += value * value; peak = Math.max(peak, Math.abs(value)); }
       this.graph.updateLevel(Math.sqrt(sum / this.samples.length), peak);
     }, 100);
+    return true;
   }
   beginTransition() {
     this.cancelTransition();
@@ -115,7 +119,7 @@ export class AudioEngine {
     void audio.play().catch(() => { if (this.outgoing === outgoing) this.releaseOutgoing(); });
   }
   onPlaying() {
-    this.resume();
+    void this.resume();
     if (!this.pendingFade) return;
     this.pendingFade = false;
     if (this.deadline !== undefined) clearTimeout(this.deadline);
@@ -155,6 +159,8 @@ export const getAudioEngine = (audio: HTMLAudioElement): AudioEngine | undefined
   }
   return engine;
 };
+/** Read an already-created engine without taking ownership of the media output. */
+export const peekAudioEngine = (audio: HTMLAudioElement): AudioEngine | undefined => engines.get(audio);
 export const prepareAudioTransition = (audio: HTMLAudioElement | null) => { if (audio) engines.get(audio)?.beginTransition(); };
 export const cancelAudioTransition = (audio: HTMLAudioElement | null) => { if (audio) engines.get(audio)?.cancelTransition(); };
 export const stopAudioEngine = (audio: HTMLAudioElement | null) => { if (audio) engines.get(audio)?.stop(); };

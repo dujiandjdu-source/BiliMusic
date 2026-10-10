@@ -23,7 +23,7 @@ import { sameSong } from "./services/songIdentity";
 import { normalizePreferences } from './services/preferences';
 import { activeDesktopLyric, calibrateLyrics, normalizeLyricsOffset } from './services/lyricCalibration';
 import { useSleepTimer } from './hooks/useSleepTimer';
-import { getAudioEngine } from './services/audioEngine';
+import { peekAudioEngine } from './services/audioEngine';
 
 const App: React.FC = () => {
   const { toast } = useToast();
@@ -78,8 +78,8 @@ const App: React.FC = () => {
   const audioPreferencesKey = JSON.stringify(preferences.audio);
   useEffect(() => {
     if (!playlist.isReady || !audioRef.current) return;
-    getAudioEngine(audioRef.current)?.configure(JSON.parse(audioPreferencesKey));
-  }, [playlist.isReady, audioPreferencesKey, audioRef]);
+    peekAudioEngine(audioRef.current)?.configure(JSON.parse(audioPreferencesKey));
+  }, [playlist.isReady, audioPreferencesKey, audioRef, playState, currentSong?.id]);
   const preferencesRequestRef = useRef(0);
   const sleep = useSleepTimer(pause, currentSong?.id);
   const displayLyrics = useMemo(() => calibrateLyrics(currentSong?.lyrics ?? [], currentSong?.lyricsOffset ?? 0),

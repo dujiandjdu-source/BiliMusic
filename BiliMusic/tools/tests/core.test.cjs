@@ -13,6 +13,17 @@ test("compact titles keep real subtitles and distinguish song versions", () => {
   assert.equal(names.parseLocalFilename("Re-Write.flac").title, "Re-Write");
 });
 
+test("YRC line timing remains authoritative when enriching lyrics", () => {
+  const parse = createRuntime()("src/services/lyrics/index.ts").parseLyrics;
+  const yrc = "[12000,2000](12000,500,0)Hello (12500,500,0)world";
+  const lines = parse(yrc, "[00:12.00]翻译");
+  const line = lines.find(item => item.text === "Hello world");
+  assert.ok(line);
+  assert.equal(line.time, 12);
+  assert.equal(line.words?.[0].startTime, 12);
+  assert.equal(line.translation, "翻译");
+});
+
 test("shared factories preserve source names, part identity, optional covers and quality", () => {
   const load = createRuntime({ "src/services/utils.ts": {} }, { window: { electronAPI: { netease: {} } } });
   const factory = load("src/services/songFactory.ts");
