@@ -2,6 +2,8 @@ import "./index.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import MiniPlayer from "./components/MiniPlayer";
+import DesktopLyrics from './components/DesktopLyrics';
 import { ToastProvider } from "./components/Toast";
 import { I18nProvider } from "./hooks/useI18n";
 
@@ -15,7 +17,8 @@ root.render(
   <React.StrictMode>
     <I18nProvider>
       <ToastProvider>
-        <App />
+        {new URLSearchParams(window.location.search).get('panel') === 'mini' ? <MiniPlayer /> :
+          new URLSearchParams(window.location.search).get('panel') === 'lyrics' ? <DesktopLyrics /> : <App />}
       </ToastProvider>
     </I18nProvider>
   </React.StrictMode>,

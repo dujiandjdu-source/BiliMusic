@@ -2,6 +2,9 @@ import { MusicLibrary, PlayMode, Song } from "../types";
 import { getNeteaseAudioUrl } from "./lyricsService";
 import { normalizeSongMetadata } from "./songMetadata";
 import { makeBiliAudioUrl } from "./songFactory";
+import { normalizeHistory, normalizePlayEvents } from "./playHistory";
+import { normalizePreferences } from "./preferences";
+import { normalizeLyricsOffset } from "./lyricCalibration";
 
 const DB = "bili-music";
 const VER = 1;
@@ -26,6 +29,9 @@ export interface StoredSong {
   colors?: string[];
   themeColor?: string;
   needsLyricsMatch?: boolean;
+  lyricsOffset?: number;
+  lyricsSourceId?: string;
+  lyricsManual?: boolean;
   isNetease?: boolean;
   neteaseId?: string;
   album?: string;
@@ -36,16 +42,21 @@ export interface StoredSong {
 }
 
 export interface LibrarySnapshot {
+  version?: 2;
+  songs?: StoredSong[];
   queue: StoredSong[];
   library: MusicLibrary;
 }
 
 export interface HydratedSnapshot {
+  songs: Song[];
   queue: Song[];
   library: MusicLibrary;
 }
 
 interface LegacyLibrarySnapshot {
+  version?: number;
+  songs?: StoredSong[];
   queue?: StoredSong[];
   originalQueue?: StoredSong[];
   library?: Partial<MusicLibrary>;
@@ -90,6 +101,9 @@ export const normalizeMusicLibrary = (input?: Partial<MusicLibrary>): MusicLibra
     favoriteSongIds: Array.isArray(input?.favoriteSongIds)
       ? input.favoriteSongIds.filter((id): id is string => typeof id === "string")
       : [],
+    playHistory: normalizeHistory(input?.playHistory),
+    playEvents: normalizePlayEvents(input?.playEvents),
+    preferences: normalizePreferences(input?.preferences),
     playlists: Array.isArray(input?.playlists)
       ? input.playlists
           .filter((playlist) => playlist && typeof playlist.id === "string")
@@ -188,6 +202,9 @@ export const toStoredSong = (song: Song): StoredSong => {
     colors: song.colors,
     themeColor: song.themeColor,
     needsLyricsMatch: song.needsLyricsMatch,
+    lyricsOffset: song.lyricsOffset,
+    lyricsSourceId: song.lyricsSourceId,
+    lyricsManual: song.lyricsManual,
     isNetease: song.isNetease,
     neteaseId: song.neteaseId,
     album: song.album,
@@ -217,6 +234,9 @@ export const fromStoredSong = (song: StoredSong, fileUrl?: string): Song | null 
       colors: song.colors,
       themeColor: song.themeColor,
       needsLyricsMatch: song.needsLyricsMatch,
+      lyricsOffset: song.lyricsOffset,
+      lyricsSourceId: song.lyricsSourceId,
+      lyricsManual: song.lyricsManual,
       isNetease: song.isNetease,
       neteaseId: song.neteaseId,
       album: song.album,
@@ -247,6 +267,9 @@ export const fromStoredSong = (song: StoredSong, fileUrl?: string): Song | null 
     colors: song.colors,
     themeColor: song.themeColor,
     needsLyricsMatch: song.needsLyricsMatch,
+    lyricsOffset: song.lyricsOffset,
+    lyricsSourceId: song.lyricsSourceId,
+    lyricsManual: song.lyricsManual,
     isNetease: song.isNetease,
     neteaseId: song.neteaseId,
     album: song.album,
@@ -260,8 +283,11 @@ export const fromStoredSong = (song: StoredSong, fileUrl?: string): Song | null 
 export const buildLibrarySnapshot = (
   queue: Song[],
   library: MusicLibrary = getDefaultMusicLibrary(),
+  songs: Song[] = queue,
 ): LibrarySnapshot => {
   return {
+    version: 2,
+    songs: songs.map(toStoredSong),
     queue: queue.map(toStoredSong),
     library: normalizeMusicLibrary(library),
   };
@@ -272,8 +298,9 @@ let pendingSnapshotSave: Promise<unknown> = Promise.resolve();
 export const saveLibrarySnapshot = async (
   queue: Song[],
   library?: MusicLibrary,
+  songs?: Song[],
 ) => {
-  const snap = buildLibrarySnapshot(queue, library);
+  const snap = buildLibrarySnapshot(queue, library, songs);
 
   const save = pendingSnapshotSave.then(() => runDb([META], "readwrite", async (tx) => {
       await waitReq(tx.objectStore(META).put(snap, SNAP));
@@ -295,22 +322,33 @@ export const parseLibrarySnapshot = (raw: unknown): LibrarySnapshot | null => {
       ? snap.queue
       : [];
 
-  const validQueue = queue.filter((song) => song && typeof song.id === "string" && song.id.trim() &&
+  const valid = (song: StoredSong) => song && typeof song.id === "string" && song.id.trim() &&
     typeof song.title === "string" && typeof song.artist === "string" &&
     ["local", "remote", "bilibili"].includes(song.source) &&
     (!song.isBilibili || (typeof song.bvid === "string" && Boolean(song.bvid))) &&
-    (!song.isNetease || (typeof song.neteaseId === "string" && Boolean(song.neteaseId))));
-  const ids = new Set<string>();
-  return { queue: validQueue.filter((song) => {
-    if (ids.has(song.id)) return false;
-    ids.add(song.id);
-    return true;
-  }).map(sanitizeStoredSong), library: normalizeMusicLibrary(snap.library) };
+    (!song.isNetease || (typeof song.neteaseId === "string" && Boolean(song.neteaseId)));
+  const sanitizeList = (list: StoredSong[]) => {
+    const ids = new Set<string>();
+    return list.filter(valid).filter((song) => {
+      if (ids.has(song.id)) return false;
+      ids.add(song.id);
+      return true;
+    }).map(sanitizeStoredSong);
+  };
+  const cleanQueue = sanitizeList(queue);
+  // Older releases stored the entire library in the queue. Never infer a new
+  // queue from the catalog: an intentionally empty queue must stay empty.
+  const songs = sanitizeList([...(Array.isArray(snap.songs) ? snap.songs : []), ...cleanQueue]);
+  const byId = new Map(songs.map((song) => [song.id, song]));
+  return { version: 2, songs, queue: cleanQueue.map((song) => byId.get(song.id)!), library: normalizeMusicLibrary(snap.library) };
 };
 
 /** Treat persisted metadata as external input, including nested lyric rows. */
 const sanitizeStoredSong = (input: StoredSong): StoredSong => {
   const song = { ...input };
+  song.lyricsOffset = normalizeLyricsOffset(song.lyricsOffset);
+  if (typeof song.lyricsSourceId !== 'string') delete song.lyricsSourceId;
+  if (typeof song.lyricsManual !== 'boolean') delete song.lyricsManual;
   const strings = ["originalTitle", "biliVideoTitle", "origin", "coverUrl", "themeColor", "album", "upName"] as const;
   for (const key of strings) if (typeof song[key] !== "string") delete song[key];
   if (!["auto", "standard", "high", "lossless"].includes(song.audioQuality || "")) delete song.audioQuality;
@@ -414,8 +452,11 @@ export const hydrateLibrarySnapshot = async (
     return out;
   };
 
+  const songs = await hydrate(snap.songs ?? snap.queue);
+  const byId = new Map(songs.map((song) => [song.id, song]));
   return {
-    queue: await hydrate(snap.queue),
+    songs,
+    queue: snap.queue.map((song) => byId.get(song.id)).filter((song): song is Song => Boolean(song)),
     library: normalizeMusicLibrary(snap.library),
   };
 };

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ToastContext, Toast, ToastType } from '../hooks/useToast';
 import { CheckIcon } from './Icons';
@@ -73,13 +73,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setToasts((prev) => prev.filter((t) => t.id !== id));
     }, []);
 
-    const contextValue = {
+    const contextValue = useMemo(() => ({
         toast: {
             success: (message: string, duration?: number) => addToast(message, 'success', duration),
             error: (message: string, duration?: number) => addToast(message, 'error', duration),
             info: (message: string, duration?: number) => addToast(message, 'info', duration),
         },
-    };
+    }), [addToast]);
 
     return (
         <ToastContext.Provider value={contextValue}>

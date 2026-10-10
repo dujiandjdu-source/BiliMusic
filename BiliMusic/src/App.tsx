@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "./hooks/useToast";
-import { PlayState, Song } from "./types";
+import { AppPreferences, PlayState, Song } from "./types";
 import FluidBackground from "./components/FluidBackground";
 import Controls from "./components/Controls";
 import LyricsView from "./components/LyricsView";
@@ -20,6 +20,9 @@ import MediaSessionController from "./components/MediaSessionController";
 import { getThemeColor } from "./services/utils";
 import type { BilibiliVideoInfo } from "./types";
 import { sameSong } from "./services/songIdentity";
+import { normalizePreferences } from './services/preferences';
+import { activeDesktopLyric, calibrateLyrics, normalizeLyricsOffset } from './services/lyricCalibration';
+import { useSleepTimer } from './hooks/useSleepTimer';
 
 const App: React.FC = () => {
   const { toast } = useToast();
@@ -30,6 +33,7 @@ const App: React.FC = () => {
     queue: playlist.queue,
     updateSongInQueue: playlist.updateSongInQueue,
     setQueue: playlist.setQueue,
+    onSongPlayed: playlist.recordSongPlayed,
   });
 
   const {
@@ -57,6 +61,48 @@ const App: React.FC = () => {
     pause,
     isBuffering,
   } = player;
+  const preferences = useMemo(() => normalizePreferences(playlist.library.preferences), [playlist.library.preferences]);
+  const lyricsPreferencesKey = JSON.stringify(preferences.desktopLyrics);
+  const shortcutPreferencesKey = JSON.stringify(preferences.shortcuts);
+  const preferencesRequestRef = useRef(0);
+  const sleep = useSleepTimer(pause, currentSong?.id);
+  const displayLyrics = useMemo(() => calibrateLyrics(currentSong?.lyrics ?? [], currentSong?.lyricsOffset ?? 0),
+    [currentSong?.lyrics, currentSong?.lyricsOffset]);
+  const updatePreferences = useCallback(async (incoming: AppPreferences) => {
+    const next = normalizePreferences(incoming), request = ++preferencesRequestRef.current;
+    if (JSON.stringify(next.shortcuts) === JSON.stringify(preferences.shortcuts)) {
+      playlist.updatePreferences(next);
+      return;
+    }
+    try {
+      const result = await window.electronAPI?.desktop?.configureShortcuts(next.shortcuts);
+      if (request !== preferencesRequestRef.current) return;
+      if (result && !result.success) { toast.error(result.error || '快捷键注册失败'); return; }
+      playlist.updatePreferences(next);
+    } catch { if (request === preferencesRequestRef.current) toast.error('设置保存失败，请重试'); }
+  }, [playlist.updatePreferences, preferences.shortcuts, toast]);
+
+  useEffect(() => {
+    if (!playlist.isReady) return;
+    const api = window.electronAPI?.desktop;
+    if (!api) return;
+    let active = true;
+    api.setLyricsPreferences(JSON.parse(lyricsPreferencesKey)).catch(() => { if (active) toast.error('桌面歌词设置未能应用'); });
+    return () => { active = false; };
+  }, [playlist.isReady, lyricsPreferencesKey, toast]);
+
+  useEffect(() => {
+    if (!playlist.isReady || !window.electronAPI?.desktop) return;
+    let active = true;
+    window.electronAPI.desktop.configureShortcuts(JSON.parse(shortcutPreferencesKey)).then(result => {
+      if (active && !result.success) toast.error(result.error || '全局快捷键注册失败');
+    }).catch(() => { if (active) toast.error('全局快捷键注册失败'); });
+    return () => { active = false; };
+  }, [playlist.isReady, shortcutPreferencesKey, toast]);
+
+  useEffect(() => window.electronAPI?.desktop?.onLyricsPreferences((desktopLyrics) => {
+    playlist.updatePreferences({ ...preferences, desktopLyrics });
+  }), [playlist.updatePreferences, preferences]);
 
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -83,6 +129,23 @@ const App: React.FC = () => {
   const openPlaylist = useCallback(() => {
     setShowPlaylist(true);
   }, []);
+
+  useEffect(() => window.electronAPI?.desktop?.onCommand((command) => {
+    if (command === 'toggle') togglePlay();
+    if (command === 'next') playNext();
+    if (command === 'previous') playPrev();
+    if (command === 'like' && currentSong) playlist.toggleLiked(currentSong.id);
+    if (command === 'favorite' && currentSong) playlist.toggleFavorite(currentSong.id);
+  }), [togglePlay, playNext, playPrev, currentSong?.id, playlist.toggleLiked, playlist.toggleFavorite]);
+
+  useEffect(() => {
+    void window.electronAPI?.desktop?.updateState({
+      title: currentSong?.title || 'BiliMusic', artist: currentSong?.artist || '选择一首歌曲',
+      coverUrl: currentSong?.coverUrl, isPlaying: playState === PlayState.PLAYING,
+      liked: Boolean(currentSong && playlist.library.likedSongIds.includes(currentSong.id)), currentTime, duration,
+      ...activeDesktopLyric(currentSong, currentTime),
+    });
+  }, [currentSong, playState, playlist.library.likedSongIds, currentTime, duration]);
   const closePlaylist = useCallback(() => {
     setShowPlaylist(false);
   }, []);
@@ -250,9 +313,9 @@ const App: React.FC = () => {
       playIndex(existingIndex);
     } else {
       // Add and play atomically - no race conditions!
-      addSongAndPlay(song);
+      addSongAndPlay(playlist.songs.find((item) => sameSong(item, song)) ?? song);
     }
-  }, [addSongAndPlay, playIndex, playlist.queue]);
+  }, [addSongAndPlay, playIndex, playlist.queue, playlist.songs]);
 
   const handleAddToQueue = useCallback((song: Song) => {
     playlist.addSongs([song]);
@@ -262,17 +325,16 @@ const App: React.FC = () => {
     const index = playlist.queue.findIndex((song) => song.id === songId);
     if (index !== -1) {
       playIndex(index);
+    } else {
+      const song = playlist.songs.find((song) => song.id === songId);
+      if (song) addSongAndPlay(song);
     }
-  }, [playIndex, playlist.queue]);
+  }, [playIndex, addSongAndPlay, playlist.queue, playlist.songs]);
 
   const handlePlaySongList = useCallback((songIds: string[]) => {
-    const first = songIds.find((id) =>
-      playlist.queue.some((song) => song.id === id),
-    );
-    if (first) {
-      handlePlaySongId(first);
-    }
-  }, [handlePlaySongId, playlist.queue]);
+    const byId = new Map(playlist.songs.map((song) => [song.id, song]));
+    player.playSongs(songIds.map((id) => byId.get(id)).filter((song): song is Song => Boolean(song)));
+  }, [player.playSongs, playlist.songs]);
 
   const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
     if (!isMobileLayout) return;
@@ -392,7 +454,7 @@ const App: React.FC = () => {
     <div className="w-full h-full relative z-20 flex flex-col justify-center px-4 lg:pl-12">
       <LyricsView
         key={lyricsKey}
-        lyrics={currentSong?.lyrics || []}
+        lyrics={displayLyrics}
         audioRef={audioRef}
         isPlaying={playState === PlayState.PLAYING}
         currentTime={currentTime}
@@ -422,7 +484,8 @@ const App: React.FC = () => {
         src={currentSong?.fileUrl}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
-        onEnded={handleAudioEnded}
+        onEnded={() => handleAudioEnded(sleep.timer.consumeEnded(currentSong?.id))}
+        onPlaying={player.handleAudioPlaying}
 
       />
 
@@ -464,6 +527,17 @@ const App: React.FC = () => {
         onClose={() => setShowSettings(false)}
         onOpenBiliVideo={setBiliVideo}
         queue={playlist.queue}
+        songs={playlist.songs}
+        onDeleteSongs={playlist.deleteSongsFromLibrary}
+        onClearHistory={playlist.clearPlayHistory}
+        playback={{ song: currentSong, preferences, onPreferences: (next) => { void updatePreferences(next); },
+          onLyricsOffset: (seconds) => { if (currentSong) playlist.updateSongInQueue(currentSong.id, {lyricsOffset:normalizeLyricsOffset(seconds)}); },
+          onLyricsFile: loadLyricsFile, onLyricsMatch: player.selectLyricsMatch, sleep: sleep.state,
+          onSleep: (value) => {
+            if (value === 'off') sleep.timer.cancel();
+            else if (value === 'song') { if (currentSong) sleep.timer.armAfterSong(currentSong.id); }
+            else sleep.timer.armMinutes(value);
+          } }}
         library={playlist.library}
         currentSongId={currentSong?.id}
         onPlaySong={handlePlaySongId}

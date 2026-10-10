@@ -48,6 +48,24 @@ interface Window {
     openFileDialog: () => Promise<string[]>;
     storeGet: (key: string) => Promise<unknown>;
     storeSet: (key: string, value: unknown) => Promise<boolean>;
+    desktop: {
+      openMini: () => Promise<boolean>;
+      openLyrics: () => Promise<boolean>;
+      getLyricsPreferences: () => Promise<import('./types').DesktopLyricsPreferences>;
+      setLyricsPreferences: (preferences: import('./types').DesktopLyricsPreferences) => Promise<import('./types').DesktopLyricsPreferences>;
+      unlockLyrics: () => Promise<void>;
+      closeLyrics: () => Promise<void>;
+      configureShortcuts: (bindings: import('./types').AppPreferences['shortcuts']) => Promise<{success:boolean;error?:string}>;
+      onLyricsPreferences: (callback: (preferences: import('./types').DesktopLyricsPreferences) => void) => () => void;
+      getState: () => Promise<import('./types').DesktopPlayerState>;
+      updateState: (state: import('./types').DesktopPlayerState) => Promise<void>;
+      command: (command: import('./types').DesktopCommand) => Promise<void>;
+      setTopmost: (value: boolean) => Promise<boolean>;
+      closePanel: () => Promise<void>;
+      quit: () => Promise<void>;
+      onCommand: (callback: (command: import('./types').DesktopCommand) => void) => () => void;
+      onState: (callback: (state: import('./types').DesktopPlayerState) => void) => () => void;
+    };
     win: {
       minimize: () => Promise<void>;
       maximize: () => Promise<void>;
@@ -86,6 +104,8 @@ interface Window {
       ) => Promise<any>;
     };
     netease: {
+      searchSongs: (keyword: string, limit?: number, offset?: number) => Promise<unknown>;
+      getLyrics: (songId: string) => Promise<unknown>;
       getAudioUrl: (
         songId: string,
         quality?: import("./types").AudioQuality,

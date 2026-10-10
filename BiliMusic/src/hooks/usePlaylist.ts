@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioQuality, MusicLibrary, Song, UserPlaylist, UserProfile } from "../types";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { AppPreferences, AudioQuality, MusicLibrary, Song, UserPlaylist, UserProfile } from "../types";
+import { normalizePreferences } from '../services/preferences';
 import type { ExtractedColors } from "../services/utils";
 import {
   deleteLocalFiles,
@@ -30,8 +31,9 @@ import { audioResourceCache } from "../services/cache";
 import { useI18n } from "./useI18n";
 import { useQueueState } from "./useQueueState";
 import { cleanSongTitle, normalizeSongMetadata, parseLocalFilename } from "../services/songMetadata";
-import { uniqueSongsAgainst as uniqueAgainst } from "../services/songIdentity";
+import { sameSong, uniqueSongsAgainst as uniqueAgainst } from "../services/songIdentity";
 import { createBilibiliSong, createNeteaseSong, makeBiliAudioUrl } from "../services/songFactory";
+import { recordPlay } from "../services/playHistory";
 
 // Levenshtein distance for fuzzy matching
 const levenshteinDistance = (str1: string, str2: string): number => {
@@ -70,7 +72,23 @@ export { cleanSongTitle as extractKeywords } from "../services/songMetadata";
 
 export const usePlaylist = () => {
   const { dict } = useI18n();
-  const { queue, setQueue, queueRef } = useQueueState();
+  const { queue, setQueue: publishQueue, queueRef } = useQueueState();
+  const { queue: songs, setQueue: setSongs, queueRef: songsRef } = useQueueState();
+  // All queue writers (including player metadata updates) register songs in the
+  // catalog. Removing a queue entry has no effect on catalog ownership.
+  const setQueue: Dispatch<SetStateAction<Song[]>> = useCallback((update) => {
+    const next = typeof update === "function" ? update(queueRef.current) : update;
+    if (next === queueRef.current) return;
+    const updates = new Map(next.map((song) => [song.id, song]));
+    const existingIds = new Set(songsRef.current.map((song) => song.id));
+    const catalog = [
+      ...songsRef.current.map((song) => updates.get(song.id) ?? song),
+      ...next.filter((song) => !existingIds.has(song.id)),
+    ];
+    if (catalog.length !== songsRef.current.length || catalog.some((song, index) => song !== songsRef.current[index])) setSongs(catalog);
+    const byId = new Map(songsRef.current.map((song) => [song.id, song]));
+    publishQueue(next.map((song) => byId.get(song.id)!));
+  }, [publishQueue, setSongs]);
   const [library, setLibrary] = useState<MusicLibrary>(getDefaultMusicLibrary);
   const [isReady, setIsReady] = useState(false);
   const urlsRef = useRef(new Map<string, string>());
@@ -110,20 +128,41 @@ export const usePlaylist = () => {
 
         const data = await hydrateLibrarySnapshot(snap);
         if (canceled) {
-          revokeLocalUrls(data.queue);
+          revokeLocalUrls(data.songs ?? data.queue);
           return;
         }
 
-        const restored = uniqueAgainst(queueRef.current, data.queue);
-        revokeLocalUrls(data.queue.filter((song) => !restored.includes(song)));
+        const restored = uniqueAgainst(songsRef.current, data.songs ?? data.queue);
+        revokeLocalUrls((data.songs ?? data.queue).filter((song) => !restored.includes(song)));
         restored.forEach((song) => {
           if (song.source === "local" && song.fileUrl.startsWith("blob:")) {
             storeUrl(song.id, song.fileUrl);
           }
         });
 
-        setQueue([...queueRef.current, ...restored]);
-        setLibrary(libraryEditsRef.current.reduce((value, edit) => edit(value), data.library));
+        setSongs([...songsRef.current, ...restored]);
+        const restoredQueue = data.queue.map((song) => songsRef.current.find((item) => sameSong(item, song)))
+          .filter((song): song is Song => Boolean(song));
+        setQueue([...queueRef.current, ...uniqueAgainst(queueRef.current, restoredQueue)]);
+        // An import may finish before startup hydration. Keep the imported ID
+        // while translating saved favorites and playlists to the same song.
+        const aliases = new Map((data.songs ?? data.queue).map((song) => [song.id,
+          songsRef.current.find((item) => sameSong(item, song))?.id ?? song.id]));
+        const remap = (ids: string[]) => Array.from(new Set(ids.map((id) => aliases.get(id) ?? id)));
+        const history = new Map<string, NonNullable<MusicLibrary['playHistory']>[number]>();
+        for (const entry of data.library.playHistory ?? []) {
+          const songId = aliases.get(entry.songId) ?? entry.songId;
+          const previous = history.get(songId);
+          history.set(songId, { songId, playCount: (previous?.playCount ?? 0) + entry.playCount,
+            lastPlayedAt: Math.max(previous?.lastPlayedAt ?? 0, entry.lastPlayedAt) });
+        }
+        const restoredLibrary: MusicLibrary = { ...data.library,
+          likedSongIds: remap(data.library.likedSongIds), favoriteSongIds: remap(data.library.favoriteSongIds),
+          playlists: data.library.playlists.map((playlist) => ({ ...playlist, songIds: remap(playlist.songIds) })),
+          playHistory: [...history.values()].sort((a, b) => b.lastPlayedAt - a.lastPlayedAt),
+          playEvents: data.library.playEvents?.map((event) => ({ ...event, songId: aliases.get(event.songId) ?? event.songId })),
+        };
+        setLibrary(libraryEditsRef.current.reduce((value, edit) => edit(value), restoredLibrary));
       } catch (err) {
         console.warn("Failed to restore library", err);
       } finally {
@@ -148,14 +187,14 @@ export const usePlaylist = () => {
       return;
     }
 
-    saveLibrarySnapshot(queue, library).catch((err) => {
+    saveLibrarySnapshot(queue, library, songs).catch((err) => {
       console.warn("Failed to save library", err);
     });
-  }, [isReady, library, queue]);
+  }, [isReady, library, queue, songs]);
 
   useEffect(() => {
     if (!isReady) return;
-    const validIds = new Set(queue.map((song) => song.id));
+    const validIds = new Set(songs.map((song) => song.id));
     setLibrary((prev) => {
       const likedSongIds = prev.likedSongIds.filter((id) => validIds.has(id));
       const favoriteSongIds = prev.favoriteSongIds.filter((id) => validIds.has(id));
@@ -174,12 +213,13 @@ export const usePlaylist = () => {
 
       return unchanged ? prev : { ...prev, likedSongIds, favoriteSongIds, playlists };
     });
-  }, [isReady, queue]);
+  }, [isReady, songs]);
 
   const updateSongInQueue = useCallback(
     (id: string, updates: Partial<Song>) => {
+      setSongs((prev) => prev.map((song) => song.id === id ? { ...song, ...updates, id } : song));
       setQueue((prev) =>
-        prev.map((song) => (song.id === id ? { ...song, ...updates } : song)),
+        prev.map((song) => (song.id === id ? { ...song, ...updates, id } : song)),
       );
     },
     [],
@@ -195,6 +235,20 @@ export const usePlaylist = () => {
 
   const toggleId = (list: string[], id: string) =>
     list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
+
+  const recordSongPlayed = useCallback((songId: string) => {
+    if (!songsRef.current.some((song) => song.id === songId)) return;
+    const now = Date.now();
+    updateLibrary((prev) => recordPlay(prev, songId, now));
+  }, [updateLibrary]);
+
+  const clearPlayHistory = useCallback(() => {
+    updateLibrary((prev) => ({ ...prev, playHistory: [], playEvents: [] }));
+  }, [updateLibrary]);
+
+  const updatePreferences = useCallback((preferences: AppPreferences) => {
+    updateLibrary((prev) => ({ ...prev, preferences: normalizePreferences(preferences) }));
+  }, [updateLibrary]);
 
   const toggleLiked = useCallback(
     (id: string) => {
@@ -340,8 +394,7 @@ export const usePlaylist = () => {
   );
 
   const setSongQuality = useCallback((id: string, audioQuality: AudioQuality) => {
-    setQueue((prev) =>
-      prev.map((song) => {
+    const update = (prev: Song[]) => prev.map((song) => {
         if (song.id !== id) return song;
         if (song.isBilibili && song.bvid) {
           return {
@@ -355,12 +408,15 @@ export const usePlaylist = () => {
           return { ...song, audioQuality, fileUrl, origin: fileUrl };
         }
         return { ...song, audioQuality };
-      }),
-    );
+      });
+    setSongs(update);
+    setQueue(update);
   }, []);
 
   const appendSongs = useCallback((songs: Song[]) => {
-    const unique = uniqueAgainst(queueRef.current, songs.map(normalizeSongMetadata));
+    const candidates = songs.map(normalizeSongMetadata).map((song) =>
+      songsRef.current.find((existing) => sameSong(existing, song)) ?? song);
+    const unique = uniqueAgainst(queueRef.current, candidates);
     if (unique.length > 0) setQueue([...queueRef.current, ...unique]);
     return unique;
   }, [setQueue]);
@@ -391,10 +447,20 @@ export const usePlaylist = () => {
 
   const removeSongs = useCallback((ids: string[]) => {
     const removedIds = new Set(ids);
-    const removed = queueRef.current.filter((song) => removedIds.has(song.id));
+    setQueue(queueRef.current.filter((song) => !removedIds.has(song.id)));
+  }, [setQueue]);
+
+  const deleteSongsFromLibrary = useCallback((ids: string[]) => {
+    const removedIds = new Set(ids);
+    const removed = songsRef.current.filter((song) => removedIds.has(song.id));
     if (removed.length === 0) return;
     const locals = removed.filter((song) => song.source === "local").map((song) => song.id);
     setQueue(queueRef.current.filter((song) => !removedIds.has(song.id)));
+    setSongs(songsRef.current.filter((song) => !removedIds.has(song.id)));
+    updateLibrary((prev) => ({ ...prev,
+      playHistory: prev.playHistory?.filter((entry) => !removedIds.has(entry.songId)),
+      playEvents: prev.playEvents?.filter((entry) => !removedIds.has(entry.songId)),
+    }));
     removed.forEach((song) => audioResourceCache.delete(song.fileUrl));
     dropUrls(locals);
     void deleteLocalFiles(locals).catch((err) => console.warn("Failed to delete local files", err));
@@ -519,7 +585,9 @@ export const usePlaylist = () => {
         });
       }
 
-      const uniqueSongs = uniqueAgainst(queueRef.current, newSongs);
+      const retained = newSongs.map((song) => songsRef.current.find((existing) => sameSong(existing, song)))
+        .filter((song): song is Song => Boolean(song));
+      const uniqueSongs = uniqueAgainst(songsRef.current, newSongs);
       const uniqueIds = new Set(uniqueSongs.map((song) => song.id));
       const uniqueFiles = audioFiles.filter((_, idx) => uniqueIds.has(newSongs[idx].id));
 
@@ -542,7 +610,7 @@ export const usePlaylist = () => {
         throw new Error("本地音乐保存失败，请检查磁盘空间后重新导入。", { cause: err });
       }
 
-      const accepted = appendSongs(uniqueSongs);
+      const accepted = appendSongs([...retained, ...uniqueSongs]);
       const acceptedIds = new Set(accepted.map((song) => song.id));
       const rejectedIds = uniqueSongs.filter((song) => !acceptedIds.has(song.id)).map((song) => song.id);
       dropUrls(rejectedIds);
@@ -633,12 +701,17 @@ export const usePlaylist = () => {
 
   return {
     queue,
+    songs,
     library,
     isReady,
+    recordSongPlayed,
+    clearPlayHistory,
+    updatePreferences,
     updateSongInQueue,
     addSongs,
     reorder,
     removeSongs,
+    deleteSongsFromLibrary,
     toggleLiked,
     toggleFavorite,
     updateProfile,

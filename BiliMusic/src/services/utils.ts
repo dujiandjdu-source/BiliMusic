@@ -28,7 +28,7 @@ export const fetchViaProxy = async (targetUrl: string): Promise<any> => {
 
   // 1. Try direct request first
   try {
-    const response = await fetch(targetUrl);
+    const response = await fetch(targetUrl, { signal: AbortSignal.timeout(8000) });
     if (!response.ok) {
       throw new Error(
         `Direct fetch failed with status: ${response.status} ${targetUrl}`,
@@ -45,7 +45,7 @@ export const fetchViaProxy = async (targetUrl: string): Promise<any> => {
 
     try {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-      const response = await fetch(proxyUrl);
+      const response = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
       if (!response.ok) {
         throw new Error(`Proxy fetch failed with status: ${response.status}`);
       }

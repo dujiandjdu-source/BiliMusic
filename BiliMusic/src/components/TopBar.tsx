@@ -96,6 +96,9 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
           <IconBtn onClick={onSettingsClick} title="设置" disabled={isVideo}>
             <SettingsIcon className="w-4 h-4" />
           </IconBtn>
+          {window.electronAPI?.desktop && <IconBtn onClick={() => { void window.electronAPI?.desktop.openMini(); }} title="迷你播放器">
+            <span className="text-lg">▣</span>
+          </IconBtn>}
           <div className="flex-1" />
           <div className="flex flex-col items-center gap-0 nodrag mt-2">
             <WinBtn onClick={() => window.electronAPI?.win?.minimize()}>

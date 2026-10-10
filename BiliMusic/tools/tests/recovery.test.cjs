@@ -69,3 +69,45 @@ test('restoration sanitizes malformed nested lyrics without losing valid songs',
   assert.equal(restored.lyrics[0].words.length, 1); assert.equal(restored.lyrics[0].translation, undefined);
   assert.equal(restored.coverUrl, undefined); assert.equal(restored.colors.length, 0);
 });
+
+test('independent catalog survives an empty queue snapshot and restarts without repopulating the queue', async () => {
+  const { store } = recoveryHarness();
+  const owned = song('owned', { source: 'remote', fileUrl: 'https://audio.test/a' });
+  const library = { ...store.getDefaultMusicLibrary(), likedSongIds: ['owned'] };
+  const parsed = store.parseLibrarySnapshot(JSON.parse(JSON.stringify(store.buildLibrarySnapshot([], library, [owned]))));
+  const hydrated = await store.hydrateLibrarySnapshot(parsed);
+  assert.equal(hydrated.queue.length, 0); assert.equal(hydrated.songs.length, 1);
+  const h = recoveryHarness({ loadLibrarySnapshot: async () => parsed, hydrateLibrarySnapshot: async () => hydrated });
+  await h.runner.settle(); assert.equal(h.runner.current.queue.length, 0);
+  assert.equal(h.runner.current.songs[0].id, 'owned'); assert.equal(h.runner.current.library.likedSongIds[0], 'owned');
+  h.runner.current.addSongs([owned]); await h.runner.settle();
+  assert.equal(h.runner.current.queue[0].id, 'owned'); h.runner.unmount();
+});
+
+test('legacy queue migrates to a catalog without changing order or collection references', async () => {
+  const { store } = recoveryHarness();
+  const rows = ['b', 'a'].map(id => ({ id, title: id, artist: 'artist', source: 'remote', origin: 'https://audio.test/'+id }));
+  const legacy = store.parseLibrarySnapshot({ originalQueue: rows, library: { favoriteSongIds: ['a'] } });
+  const hydrated = await store.hydrateLibrarySnapshot(legacy);
+  assert.deepEqual(Array.from(hydrated.songs, s => s.id), ['b','a']);
+  assert.deepEqual(Array.from(hydrated.queue, s => s.id), ['b','a']);
+  assert.equal(hydrated.queue[0], hydrated.songs[0]);
+  assert.equal(hydrated.library.favoriteSongIds[0], 'a');
+});
+
+test('an import racing startup keeps the saved favorites and playlist references on the canonical ID', async () => {
+  const restore = deferred();
+  const oldSong = song('old-id', {title:'same', isNetease:true, neteaseId:'123'});
+  const h = recoveryHarness({ loadLibrarySnapshot: () => restore.promise,
+    hydrateLibrarySnapshot: async () => ({ queue: [oldSong], songs: [oldSong], library: {
+      ...h.store.getDefaultMusicLibrary(), likedSongIds:['old-id'], favoriteSongIds:['old-id'],
+      playlists:[{id:'p',name:'saved',songIds:['old-id'],createdAt:1,updatedAt:1}],
+    } }) });
+  h.runner.current.addSongs([song('new-id', {title:'same',isNetease:true,neteaseId:'123'})]);
+  restore.resolve({}); await h.runner.settle();
+  assert.equal(h.runner.current.songs.length,1); assert.equal(h.runner.current.queue.length,1);
+  assert.deepEqual(Array.from(h.runner.current.library.likedSongIds),['new-id']);
+  assert.deepEqual(Array.from(h.runner.current.library.favoriteSongIds),['new-id']);
+  assert.deepEqual(Array.from(h.runner.current.library.playlists[0].songIds),['new-id']);
+  h.runner.unmount();
+});

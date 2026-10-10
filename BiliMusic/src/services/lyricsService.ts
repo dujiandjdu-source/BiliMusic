@@ -348,7 +348,7 @@ const fetchTtmlByNeteaseId = async (id: string): Promise<string | null> => {
   const url = `${TTML_DB_BASE}/ncm/${encodeURIComponent(id)}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) {
       if (res.status !== 404) {
         console.warn("TTML lyrics fetch failed", res.status, id);
@@ -376,9 +376,10 @@ export const searchNetEase = async (
   )}&limit=${limit}&offset=${offset}`;
 
   try {
-    const parsedSearchApiResponse = (await fetchViaProxy(
-      searchApiUrl,
-    )) as NeteaseSearchResponse;
+    const desktop = window.electronAPI?.netease;
+    const parsedSearchApiResponse = (desktop?.searchSongs
+      ? await desktop.searchSongs(keyword, limit, offset)
+      : await fetchViaProxy(searchApiUrl)) as NeteaseSearchResponse;
     const songs = parsedSearchApiResponse.result?.songs ?? [];
 
     if (songs.length === 0) {
@@ -481,7 +482,8 @@ export const fetchLyricsById = async (
       (async () => {
         const lyricUrl = `${NETEASECLOUD_API_BASE}/lyric/new?id=${songId}`;
         try {
-          return await fetchViaProxy(lyricUrl);
+          const desktop = window.electronAPI?.netease;
+          return desktop?.getLyrics ? await desktop.getLyrics(songId) : await fetchViaProxy(lyricUrl);
         } catch (err) {
           console.error("Lyric fetch error", err);
           return null;

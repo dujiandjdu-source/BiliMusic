@@ -35,7 +35,33 @@ test("concurrent local imports report only accepted songs and release rejected f
   assert.equal(current.artist, "歌手"); assert.equal(current.lyrics[0].text, "歌词");
   assert.equal(h.deleted.length, 1); assert.notEqual(h.deleted[0], current.id);
   h.runner.current.removeSongs([current.id]); await h.runner.settle();
-  assert.equal(h.runner.current.queue.length, 0); assert.equal(h.deleted.filter((id) => id === current.id).length, 1);
+  assert.equal(h.runner.current.queue.length, 0); assert.equal(h.deleted.filter((id) => id === current.id).length, 0);
+  assert.equal(h.runner.current.songs[0].fileUrl, current.fileUrl);
+  const readded = await h.runner.current.addLocalFiles(files); await h.runner.settle();
+  assert.equal(readded[0].id, current.id); assert.equal(h.runner.current.songs.length, 1);
+  assert.equal(h.saved.length, 2, 'reimport uses retained file rather than saving another copy');
+  h.runner.current.deleteSongsFromLibrary([current.id]); await h.runner.settle();
+  assert.equal(h.runner.current.songs.length, 0); assert.equal(h.runner.current.queue.length, 0);
+  assert.equal(h.deleted.filter((id) => id === current.id).length, 1);
+});
+
+test('clearing a queue retains library membership and metadata updates; explicit deletion cleans references', async () => {
+  const h = playlistHarness(); await h.runner.settle();
+  h.runner.current.addSongs([song('a'), song('b')]);
+  h.runner.current.toggleLiked('a'); h.runner.current.toggleFavorite('a');
+  h.runner.current.createPlaylist('saved', ['a', 'b']); await h.runner.settle();
+  h.runner.current.removeSongs(['a', 'b']); await h.runner.settle();
+  assert.equal(h.runner.current.queue.length, 0); assert.equal(h.runner.current.songs.length, 2);
+  assert.deepEqual(Array.from(h.runner.current.library.likedSongIds), ['a']);
+  assert.deepEqual(Array.from(h.runner.current.library.favoriteSongIds), ['a']);
+  assert.deepEqual(Array.from(h.runner.current.library.playlists[0].songIds), ['a', 'b']);
+  h.runner.current.updateSongInQueue('a', { lyrics: [{ time: 2, text: 'edited' }] });
+  h.runner.current.addSongs([song('a')]); await h.runner.settle();
+  assert.equal(h.runner.current.queue[0].lyrics[0].text, 'edited');
+  h.runner.current.deleteSongsFromLibrary(['a']); await h.runner.settle();
+  assert.equal(h.runner.current.library.likedSongIds.length, 0);
+  assert.equal(h.runner.current.library.favoriteSongIds.length, 0);
+  assert.deepEqual(Array.from(h.runner.current.library.playlists[0].songIds), ['b']);
 });
 
 test("concurrent Bilibili imports keep stable part titles and report duplicates honestly", async () => {

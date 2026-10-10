@@ -36,6 +36,9 @@ export interface Song {
   colors?: string[]; // Array of dominant/accent colors
   themeColor?: string; // Stable dominant color for PWA/browser chrome
   needsLyricsMatch?: boolean; // Flag indicating song needs cloud lyrics matching
+  lyricsOffset?: number; // Seconds; positive values delay lyric timestamps.
+  lyricsSourceId?: string;
+  lyricsManual?: boolean;
   // Netease specific fields
   isNetease?: boolean;
   neteaseId?: string;
@@ -69,7 +72,48 @@ export interface MusicLibrary {
   likedSongIds: string[];
   favoriteSongIds: string[];
   playlists: UserPlaylist[];
+  playHistory?: PlayHistoryEntry[];
+  playEvents?: PlayEvent[];
+  preferences?: AppPreferences;
 }
+
+export interface DesktopLyricsPreferences {
+  topmost: boolean;
+  locked: boolean;
+  clickThrough: boolean;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+  translationColor: string;
+}
+
+export type GlobalShortcutAction = 'toggle' | 'previous' | 'next' | 'favorite';
+export interface AppPreferences {
+  desktopLyrics: DesktopLyricsPreferences;
+  shortcuts: Record<GlobalShortcutAction, string>;
+}
+
+export interface PlayHistoryEntry {
+  songId: string;
+  playCount: number;
+  lastPlayedAt: number;
+}
+
+export interface PlayEvent { songId: string; playedAt: number; }
+
+export interface DesktopPlayerState {
+  title: string;
+  artist: string;
+  coverUrl?: string;
+  isPlaying: boolean;
+  liked: boolean;
+  currentTime?: number;
+  duration?: number;
+  lyric?: string;
+  translation?: string;
+}
+
+export type DesktopCommand = 'toggle' | 'previous' | 'next' | 'like' | 'favorite' | 'restore';
 
 export interface BilibiliLoginStatus {
   isLogin: boolean;

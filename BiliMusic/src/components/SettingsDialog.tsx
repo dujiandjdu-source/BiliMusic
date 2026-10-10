@@ -11,8 +11,11 @@ import type {
 } from "../types";
 import { CloseIcon, BilibiliIcon, LikeIcon } from "./Icons";
 import { clearResourceCaches } from "../services/cache";
+import { recentlyFrequentIds } from "../services/playHistory";
+import SmartImage from "./SmartImage";
+import PlaybackSettings, { type PlaybackSettingsProps } from './PlaybackSettings';
 
-type SettingsTab = "profile" | "account" | "liked" | "favorites" | "playlists" | "about";
+type SettingsTab = "profile" | "account" | "songs" | "history" | "liked" | "favorites" | "playlists" | "playback" | "about";
 
 interface ParsedSemver {
   core: [string, string, string];
@@ -83,6 +86,10 @@ interface SettingsDialogProps {
   onClose: () => void;
   onOpenBiliVideo: (video: BilibiliVideoInfo) => void;
   queue: Song[];
+  songs: Song[];
+  onDeleteSongs: (ids: string[]) => void;
+  onClearHistory: () => void;
+  playback: PlaybackSettingsProps;
   library: MusicLibrary;
   currentSongId?: string;
   onPlaySong: (songId: string) => void;
@@ -104,6 +111,10 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onClose,
   onOpenBiliVideo,
   queue,
+  songs,
+  onDeleteSongs,
+  onClearHistory,
+  playback,
   library,
   currentSongId,
   onPlaySong,
@@ -147,8 +158,8 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const songById = useMemo(
-    () => new Map(queue.map((song) => [song.id, song])),
-    [queue],
+    () => new Map(songs.map((song) => [song.id, song])),
+    [songs],
   );
   const likedSongs = useMemo(
     () => library.likedSongIds.map((id) => songById.get(id)).filter(Boolean) as Song[],
@@ -399,9 +410,12 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
             {([
               ["profile", "个人主页"],
               ["account", "B站账号"],
+              ["songs", `音乐库 · ${songs.length}`],
+              ["history", "播放历史"],
               ["liked", `喜欢 · ${likedSongs.length}`],
               ["favorites", `收藏 · ${favoriteSongs.length}`],
               ["playlists", `歌单 · ${library.playlists.length}`],
+              ["playback", "播放设置"],
               ["about", "关于"],
             ] as Array<[SettingsTab, string]>).map(([value, label]) => (
               <button
@@ -454,7 +468,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 </section>
 
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <StatCard label="全部歌曲" value={queue.length} />
+                  <StatCard label="全部歌曲" value={songs.length} />
                   <StatCard label="喜欢" value={likedSongs.length} />
                   <StatCard label="收藏" value={favoriteSongs.length} />
                   <StatCard label="创建歌单" value={library.playlists.length} />
@@ -597,6 +611,54 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   </section>
                 )}
               </div>
+            )}
+
+            {tab === "playback" && <PlaybackSettings {...playback} />}
+
+            {tab === "history" && (
+              <div className="space-y-4">
+                <SongSection
+                  title="最近常听 · 30 天"
+                  empty="播放歌曲后自动生成，按近 30 天播放次数排序，最多 50 首。"
+                  songs={recentlyFrequentIds(library).map((id) => songById.get(id)).filter((song): song is Song => Boolean(song))}
+                  currentSongId={currentSongId} likedIds={library.likedSongIds} favoriteIds={library.favoriteSongIds}
+                  onPlaySong={onPlaySong} onPlayAll={() => onPlaySongList(recentlyFrequentIds(library))}
+                  onToggleLiked={onToggleLiked} onToggleFavorite={onToggleFavorite}
+                />
+                <SongSection
+                  title="最近播放"
+                  empty="还没有播放记录。"
+                  songs={(library.playHistory ?? []).map((entry) => songById.get(entry.songId)).filter((song): song is Song => Boolean(song))}
+                  currentSongId={currentSongId} likedIds={library.likedSongIds} favoriteIds={library.favoriteSongIds}
+                  onPlaySong={onPlaySong} onPlayAll={() => onPlaySongList((library.playHistory ?? []).map((entry) => entry.songId))}
+                  onToggleLiked={onToggleLiked} onToggleFavorite={onToggleFavorite}
+                  describeSong={(song) => {
+                    const entry = library.playHistory?.find((entry) => entry.songId === song.id);
+                    return entry ? `播放 ${entry.playCount} 次 · ${new Date(entry.lastPlayedAt).toLocaleString()}` : song.artist;
+                  }}
+                />
+                <button className="rounded-lg bg-white/8 px-3 py-2 text-sm" onClick={() => {
+                  if (window.confirm("清空所有播放历史与常听统计？音乐库和歌单会保留。")) onClearHistory();
+                }}>清空播放历史</button>
+              </div>
+            )}
+
+            {tab === "songs" && (
+              <SongSection
+                title="音乐库"
+                empty="导入歌曲后会自动保存在这里。移出播放队列不会删除音乐库中的歌曲。"
+                songs={songs}
+                currentSongId={currentSongId}
+                likedIds={library.likedSongIds}
+                favoriteIds={library.favoriteSongIds}
+                onPlaySong={onPlaySong}
+                onPlayAll={() => onPlaySongList(songs.map((song) => song.id))}
+                onToggleLiked={onToggleLiked}
+                onToggleFavorite={onToggleFavorite}
+                onDeleteSong={(id) => {
+                  if (window.confirm("从音乐库删除这首歌？同时移除收藏、歌单引用和应用内本地副本，原始文件不会删除。")) onDeleteSongs([id]);
+                }}
+              />
             )}
 
             {tab === "liked" && (
@@ -929,6 +991,8 @@ const SongSection: React.FC<{
   onPlayAll: () => void;
   onToggleLiked: (id: string) => void;
   onToggleFavorite: (id: string) => void;
+  onDeleteSong?: (id: string) => void;
+  describeSong?: (song: Song) => string;
 }> = ({
   title,
   empty,
@@ -940,6 +1004,8 @@ const SongSection: React.FC<{
   onPlayAll,
   onToggleLiked,
   onToggleFavorite,
+  onDeleteSong,
+  describeSong,
 }) => (
   <section className="rounded-2xl border border-white/8 bg-white/5 p-4">
     <div className="mb-3 flex items-center justify-between">
@@ -964,10 +1030,12 @@ const SongSection: React.FC<{
             key={song.id}
             className={`flex items-center gap-3 rounded-xl p-2 ${song.id === currentSongId ? "bg-white/10" : "bg-white/[0.03] hover:bg-white/6"}`}
           >
-            <img src={song.coverUrl || ""} className="h-10 w-10 rounded-lg object-cover bg-white/8" alt="" />
+            <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/8">
+              <SmartImage src={song.coverUrl || ""} alt="" />
+            </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{song.title}</div>
-              <div className="truncate text-xs text-white/40">{song.artist}</div>
+              <div className="truncate text-xs text-white/40">{describeSong?.(song) ?? song.artist}</div>
             </div>
             <button onClick={() => onPlaySong(song.id)} className="rounded-lg bg-white/8 px-3 py-1.5 text-xs hover:bg-white/12">
               播放
@@ -978,6 +1046,7 @@ const SongSection: React.FC<{
             <button onClick={() => onToggleFavorite(song.id)} className={`rounded-lg px-2 py-1.5 text-xs ${favoriteIds.includes(song.id) ? "text-amber-200" : "text-white/35 hover:text-white"}`}>
               收藏
             </button>
+            {onDeleteSong && <button onClick={() => onDeleteSong(song.id)} className="rounded-lg px-2 py-1.5 text-xs text-red-300 hover:bg-red-500/10">删除</button>}
           </div>
         ))}
       </div>

@@ -3,6 +3,7 @@ const { autoUpdater } = require("electron-updater");
 const path = require("path");
 let mainWindow;
 let browserView = null;
+let desktop;
 
 const BILIBILI_HOST_RE = /(^|\.)(bilibili|b23|hdslb)\.(com|tv)$|(^|\.)biliapi\.net$|(^|\.)bilivideo\.com$/i;
 const BILIBILI_URL = "https://www.bilibili.com/";
@@ -71,12 +72,15 @@ function createWindow() {
     width: 1280, height: 800, minWidth: 900, minHeight: 600,
     title: "BiliMusic", backgroundColor: "#0b0c10",
     frame: false, titleBarStyle: "hidden",
-    webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, webviewTag: false },
+    webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false },
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { if (isHttp(url)) shell.openExternal(url); return { action: "deny" }; });
 
   mainWindow.on("resize", () => { if (browserView && browserView.getBounds().width > 0) browserView.setBounds(getBounds()); });
+  mainWindow.on("close", (event) => {
+    if (desktop?.shouldHideOnClose()) { event.preventDefault(); mainWindow.hide(); }
+  });
 
   ipcMain.handle("win:minimize", () => mainWindow.minimize());
   ipcMain.handle("win:maximize", () => { mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize(); });
@@ -131,7 +135,9 @@ app.whenReady().then(() => {
   require("./ipc/system.cjs")(ipcMain);
   require("./ipc/bilibili.js")(ipcMain, ses);
   require("./ipc/netease.js")(ipcMain, ses);
+  require('./netease-metadata.cjs')(ipcMain, ses);
   createWindow();
+  desktop = require('./desktop.cjs')(() => mainWindow);
   createBrowserView();
 });
 

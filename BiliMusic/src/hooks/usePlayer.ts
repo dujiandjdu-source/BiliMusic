@@ -27,6 +27,7 @@ interface UsePlayerParams {
   queue: Song[];
   updateSongInQueue: (id: string, updates: Partial<Song>) => void;
   setQueue: Dispatch<SetStateAction<Song[]>>;
+  onSongPlayed?: (songId: string) => void;
 }
 
 const MATCH_TIMEOUT_MS = 8000;
@@ -53,6 +54,7 @@ export const usePlayer = ({
   queue,
   updateSongInQueue,
   setQueue,
+  onSongPlayed,
 }: UsePlayerParams) => {
   const [savedPlayback] = useState(loadPlaybackSnapshot);
   const savedRef = useRef(savedPlayback);
@@ -74,6 +76,9 @@ export const usePlayer = ({
   const poolRef = useRef<string[]>([]);
   const pastRef = useRef<string[]>([]);
   const playRequestRef = useRef(0);
+  const playVisitRef = useRef(0);
+  const countedVisitRef = useRef(-1);
+  const lyricsRequestRef = useRef(0);
 
   // Keep playStateRef in sync with playState
   useEffect(() => {
@@ -94,6 +99,7 @@ export const usePlayer = ({
   }, [preservesPitch, speed]);
 
   const pauseAndResetCurrentAudio = useCallback(() => {
+    playVisitRef.current += 1;
     playRequestRef.current += 1;
     if (!audioRef.current) return;
     audioRef.current.pause();
@@ -118,7 +124,10 @@ export const usePlayer = ({
     (index: number, list: Song[] = queue) => {
       const song = index >= 0 ? list[index] : undefined;
       primeNeteaseMeta(song);
-      if (songRef.current !== (song?.id ?? null)) playRequestRef.current += 1;
+      if (songRef.current !== (song?.id ?? null)) {
+        playRequestRef.current += 1;
+        playVisitRef.current += 1;
+      }
       songRef.current = song?.id ?? null;
       setCurrentIndex(index);
     },
@@ -330,8 +339,8 @@ export const usePlayer = ({
     if (queue.length === 0) return;
 
     if (playMode === PlayMode.LOOP_ONE || queue.length === 1) {
+      pauseAndResetCurrentAudio();
       if (audioRef.current) {
-        audioRef.current.currentTime = 0;
         void playAudioElement("Loop-one play next");
       }
       return;
@@ -461,7 +470,9 @@ export const usePlayer = ({
     [queue, playMode, pauseAndResetCurrentAudio, setIndex, currentSong?.id, playAudioElement],
   );
 
-  const handleAudioEnded = useCallback(() => {
+  const handleAudioEnded = useCallback((stopAfterCurrent = false) => {
+    playVisitRef.current += 1;
+    if (stopAfterCurrent) { pause(); return; }
     if (playMode === PlayMode.LOOP_ONE) {
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
@@ -476,7 +487,7 @@ export const usePlayer = ({
     }
 
     playNext();
-  }, [playMode, queue.length, playNext, playAudioElement]);
+  }, [playMode, queue.length, playNext, playAudioElement, pause]);
 
   const addSongAndPlay = useCallback(
     (song: Song) => {
@@ -494,6 +505,25 @@ export const usePlayer = ({
     },
     [playMode, currentSong?.id, queue, setIndex, setQueue],
   );
+
+  const handleAudioPlaying = useCallback(() => {
+    if (!songRef.current || audioRef.current?.paused || countedVisitRef.current === playVisitRef.current) return;
+    countedVisitRef.current = playVisitRef.current;
+    onSongPlayed?.(songRef.current);
+  }, [onSongPlayed]);
+
+  const playSongs = useCallback((songs: Song[]) => {
+    if (songs.length === 0) return;
+    const next = uniqueSongsAgainst([], songs);
+    pauseAndResetCurrentAudio();
+    setQueue(next);
+    setIndex(0, next);
+    poolRef.current = [];
+    pastRef.current = [];
+    setPlayState(PlayState.PLAYING);
+    setMatchStatus("idle");
+    if (next[0].id === currentSong?.id && next[0].fileUrl === currentSong.fileUrl) void playAudioElement("Replay playlist");
+  }, [setQueue, setIndex, pauseAndResetCurrentAudio, currentSong?.id, currentSong?.fileUrl, playAudioElement]);
 
   const handlePlaylistAddition = useCallback(
     (added: Song[], wasEmpty: boolean) => {
@@ -530,23 +560,44 @@ export const usePlayer = ({
   );
 
   const loadLyricsFile = useCallback(
-    (file?: File) => {
-      if (!file || !currentSong) return;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        if (text) {
-          const parsedLyrics = parseLyrics(text);
-          updateSongInQueue(currentSong.id, { lyrics: parsedLyrics });
-          setMatchStatus("success");
-        }
-      };
-      reader.readAsText(file);
+    async (file?: File): Promise<boolean> => {
+      if (!file || !currentSong) return false;
+      const songId = currentSong.id, request = ++lyricsRequestRef.current;
+      try {
+        const parsedLyrics = parseLyrics(await file.text());
+        if (!parsedLyrics.some((line) => !line.isMetadata && line.text.trim())) throw new Error('歌词文件中没有可用歌词');
+        if (request !== lyricsRequestRef.current || songRef.current !== songId) return false;
+        updateSongInQueue(songId, { lyrics: parsedLyrics, lyricsManual: true, lyricsSourceId: undefined, needsLyricsMatch: false });
+        setMatchStatus("success");
+        return true;
+      } catch (error) {
+        if (request === lyricsRequestRef.current && songRef.current === songId) setMatchStatus(currentSong.lyrics?.length ? 'success' : 'failed');
+        throw error;
+      }
     },
     [currentSong, updateSongInQueue],
   );
 
+  const selectLyricsMatch = useCallback(async (sourceId: string): Promise<boolean> => {
+    if (!currentSong || !/^\d+$/.test(sourceId)) return false;
+    const songId = currentSong.id, request = ++lyricsRequestRef.current;
+    try {
+      const result = await withTimeout(fetchLyricsById(sourceId), MATCH_TIMEOUT_MS);
+      if (!result) throw new Error('未找到这首歌的歌词');
+      const lyrics = mergeLyricsWithMetadata(result);
+      if (!lyrics.some((line) => !line.isMetadata && line.text.trim())) throw new Error('所选歌曲没有可用歌词');
+      if (request !== lyricsRequestRef.current || songRef.current !== songId) return false;
+      updateSongInQueue(songId, { lyrics, lyricsManual: true, lyricsSourceId: sourceId, needsLyricsMatch: false });
+      setMatchStatus('success');
+      return true;
+    } catch (error) {
+      if (request === lyricsRequestRef.current && songRef.current === songId) setMatchStatus(currentSong.lyrics?.length ? 'success' : 'failed');
+      throw error;
+    }
+  }, [currentSong?.id, currentSong?.lyrics, mergeLyricsWithMetadata, updateSongInQueue]);
+
   useEffect(() => {
+    const request = ++lyricsRequestRef.current;
     if (!currentSong) {
       if (matchStatus !== "idle") {
         setMatchStatus("idle");
@@ -565,7 +616,7 @@ export const usePlayer = ({
     let cancelled = false;
 
     const markMatchFailed = () => {
-      if (cancelled) return;
+      if (cancelled || request !== lyricsRequestRef.current) return;
       updateSongInQueue(songId, {
         needsLyricsMatch: false,
       });
@@ -573,7 +624,7 @@ export const usePlayer = ({
     };
 
     const markMatchSuccess = () => {
-      if (cancelled) return;
+      if (cancelled || request !== lyricsRequestRef.current) return;
       setMatchStatus("success");
     };
 
@@ -582,6 +633,7 @@ export const usePlayer = ({
       return;
     }
 
+    if (currentSong.lyricsManual) return;
     if (!needsLyricsMatch) {
       markMatchFailed();
       return;
@@ -595,7 +647,7 @@ export const usePlayer = ({
             fetchLyricsById(songNeteaseId),
             MATCH_TIMEOUT_MS,
           );
-          if (cancelled) return;
+          if (cancelled || request !== lyricsRequestRef.current) return;
           if (raw) {
             updateSongInQueue(songId, {
               lyrics: mergeLyricsWithMetadata(raw),
@@ -610,7 +662,7 @@ export const usePlayer = ({
             searchAndMatchLyrics(songTitle, songArtist),
             MATCH_TIMEOUT_MS,
           );
-          if (cancelled) return;
+          if (cancelled || request !== lyricsRequestRef.current) return;
           if (result) {
             updateSongInQueue(songId, {
               lyrics: mergeLyricsWithMetadata(result),
@@ -632,7 +684,7 @@ export const usePlayer = ({
     return () => {
       cancelled = true;
     };
-  }, [currentSong?.id, mergeLyricsWithMetadata, updateSongInQueue]);
+  }, [currentSong?.id, currentSong?.lyricsManual, mergeLyricsWithMetadata, updateSongInQueue]);
 
   // Error retry state — use ref so it persists across re-renders
   const errorRetryRef = useRef(0);
@@ -906,8 +958,11 @@ export const usePlayer = ({
     handleLoadedMetadata,
     handlePlaylistAddition,
     loadLyricsFile,
+    selectLyricsMatch,
     addSongAndPlay,
+    playSongs,
     handleAudioEnded,
+    handleAudioPlaying,
     setSpeed: handleSetSpeed,
     togglePreservesPitch: handleTogglePreservesPitch,
     pitch: 0, // Default pitch

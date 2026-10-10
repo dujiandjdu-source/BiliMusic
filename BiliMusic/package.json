@@ -1,7 +1,7 @@
 {
   "name": "bili-music",
   "private": true,
-  "version": "1.0.8",
+  "version": "1.2.0",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
