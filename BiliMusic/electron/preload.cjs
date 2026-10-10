@@ -3,8 +3,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openFileDialog: () => ipcRenderer.invoke("open-file-dialog"),
   storeGet: (k) => ipcRenderer.invoke("store-get", k),
   storeSet: (k, v) => ipcRenderer.invoke("store-set", k, v),
+  updater: {
+    getState: () => ipcRenderer.invoke('updater:get-state'),
+    check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    openRelease: () => ipcRenderer.invoke('updater:open-release'),
+    onState: (cb) => { const fn = (_, state) => cb(state); ipcRenderer.on('updater:state', fn); return () => ipcRenderer.removeListener('updater:state', fn); },
+  },
   desktop: {
     openMini: () => ipcRenderer.invoke('desktop:mini'),
+    setMiniExpanded: (value) => ipcRenderer.invoke('desktop:mini-expanded', value),
     openLyrics: () => ipcRenderer.invoke('desktop:lyrics'),
     getLyricsPreferences: () => ipcRenderer.invoke('desktop:get-lyrics-preferences'),
     setLyricsPreferences: (preferences) => ipcRenderer.invoke('desktop:set-lyrics-preferences', preferences),
@@ -63,6 +72,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   /* ---- BrowserView ---- */
   browser: {
     show: () => ipcRenderer.invoke("browser:show"),
+    setChromeVisible: (visible) => ipcRenderer.invoke("browser:chrome", visible),
     hide: () => ipcRenderer.invoke("browser:hide"),
     navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
     goBack: () => ipcRenderer.invoke("browser:goBack"),

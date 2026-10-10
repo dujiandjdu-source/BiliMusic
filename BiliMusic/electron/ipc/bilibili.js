@@ -547,6 +547,7 @@ module.exports = function registerBilibili(ipc, ses) {
   });
 };
 
+module.exports.getPlayableAudio = getPlayableAudio;
 module.exports._test = {
   getMixinKey,
   cleanTitle,

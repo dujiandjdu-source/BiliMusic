@@ -397,7 +397,7 @@ const Controls: React.FC<ControlsProps> = ({
     >
       <div
         ref={fitRef}
-        className="w-full flex flex-col items-center justify-center text-white select-none p-4 sm:p-6 font-sans origin-top"
+        className="ios-player w-full flex flex-col items-center justify-center text-white select-none p-4 sm:p-6 origin-top"
         style={{
           transform: fitScale < 1 ? `scale(${fitScale})` : undefined,
           transformOrigin: "top center",
@@ -409,7 +409,7 @@ const Controls: React.FC<ControlsProps> = ({
             boxShadow: coverSpring.boxShadow,
             transform: coverScaleSpring.scale.to((s) => `scale(${s})`),
           }}
-          className="relative aspect-square w-full rounded-2xl bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden mb-10"
+          className="ios-cover relative aspect-square w-full rounded-2xl bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden mb-10"
         >
           {coverUrl ? (
             <SmartImage
@@ -430,10 +430,10 @@ const Controls: React.FC<ControlsProps> = ({
       {/* Song Info */}
       <div className="w-full flex items-center justify-between mb-8 px-1">
         <div className="flex flex-col items-start overflow-hidden pr-4 max-w-[85%] select-text">
-          <h2 className="text-[1.4rem] leading-tight font-bold tracking-tight drop-shadow-md truncate text-left w-full text-white select-text">
+          <h2 className="ios-song-title text-[1.4rem] leading-tight font-bold tracking-tight drop-shadow-md truncate text-left w-full text-white select-text">
             {title}
           </h2>
-          <p className="text-white/60 text-[1.1rem] leading-tight font-medium truncate text-left w-full mt-0.5 select-text">
+          <p className="ios-song-artist text-white/60 text-[1.1rem] leading-tight font-medium truncate text-left w-full mt-0.5 select-text">
             {artist}
           </p>
         </div>
@@ -549,7 +549,7 @@ const Controls: React.FC<ControlsProps> = ({
         <button
           onClick={onPlayPause}
           aria-label={dict.keys.playPause}
-          className="relative flex items-center justify-center p-3 hover:bg-white/10 rounded-full active:bg-white/20 transition-all outline-none transform active:scale-95 text-white"
+          className="ios-play-button relative flex items-center justify-center p-3 rounded-full transition-all outline-none transform active:scale-95"
         >
           <div className="relative w-10 h-10 flex items-center justify-center">
             <PauseIcon

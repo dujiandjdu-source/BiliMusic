@@ -4,11 +4,15 @@ const { createRuntime, createHooks, deferred, song } = require("./runtime.cjs");
 
 function playerHarness(initialQueue, onSongPlayed, lyricsService = {}) {
   const runner = createHooks(); let queue = initialQueue;
-  const pending = [];
+  const pending = [], listeners = new Map();
   const audio = {
     src: "", paused: true, currentTime: 0, duration: 60, readyState: 4, deferPlay: false,
     play() { this.paused = false; if (!this.deferPlay) return Promise.resolve(); const task = deferred(); pending.push(task); return task.promise; },
-    pause() { this.paused = true; }, load() {}, addEventListener() {}, removeEventListener() {},
+    error: null, loads: 0,
+    pause() { this.paused = true; }, load() { this.loads++; this.error = null; },
+    addEventListener(name, handler) { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(handler); },
+    removeEventListener(name, handler) { listeners.get(name)?.delete(handler); },
+    emit(name) { for (const handler of [...(listeners.get(name) || [])]) handler(); },
   };
   const load = createRuntime({
     react: runner.hooks,
@@ -43,6 +47,26 @@ test("same-song replay and single-queue next/previous start the actual audio", a
     assert.equal(h.runner.current.currentSong.id, count === 1 ? "0" : "1");
     await h.act((player) => player.playPrev()); assert.equal(h.audio.paused, false); assert.equal(h.runner.current.currentSong.id, "0");
   }
+});
+
+test('failed media resets UI, retries with a fresh load, and stops automatic retries', async () => {
+  const h = playerHarness([song('a')]);
+  await h.act(p => p.playIndex(0));
+  await h.act(() => { h.audio.error = { code: 4 }; h.audio.paused = true; h.audio.emit('error'); });
+  assert.equal(h.runner.current.playState, h.types.PlayState.PAUSED);
+  assert.ok(h.runner.current.playbackError);
+  const before = h.audio.loads;
+  await h.act(p => p.togglePlay());
+  assert.equal(h.audio.loads, before + 1);
+  assert.equal(h.audio.paused, false);
+  assert.equal(h.runner.current.playbackError, null);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await h.act(() => { h.audio.error = { code: 2 }; h.audio.paused = true; h.audio.emit('error'); });
+  }
+  assert.equal(h.audio.loads, before + 3, 'only two automatic network retries');
+  assert.equal(h.runner.current.playState, h.types.PlayState.PAUSED);
+  assert.ok(h.runner.current.playbackError);
+  h.runner.unmount();
 });
 
 test("shuffle previous works both before and after visiting another track", async () => {

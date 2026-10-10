@@ -1,0 +1,4 @@
+provider: github
+owner: dujiandjdu-source
+repo: BiliMusic
+updaterCacheDirName: bili-music-updater

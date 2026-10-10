@@ -15,6 +15,7 @@ import { recentlyFrequentIds } from "../services/playHistory";
 import SmartImage from "./SmartImage";
 import PlaybackSettings, { type PlaybackSettingsProps } from './PlaybackSettings';
 import LibraryBackupSettings from './LibraryBackupSettings';
+import UpdateSettings from './UpdateSettings';
 
 type SettingsTab = "profile" | "account" | "songs" | "history" | "liked" | "favorites" | "playlists" | "playback" | "about";
 
@@ -153,8 +154,6 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [importUrl, setImportUrl] = useState("");
   const [importName, setImportName] = useState("");
   const [libraryMessage, setLibraryMessage] = useState("");
-  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "up-to-date" | "error">("idle");
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string } | null>(null);
   const [cacheSize, setCacheSize] = useState<string>("");
   const [isClearingCache, setIsClearingCache] = useState(false);
   const pollToken = useRef(0);
@@ -388,7 +387,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
     >
       <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" aria-hidden="true" />
       <div
-        className="settings-inner relative flex h-[680px] max-h-[calc(100dvh-1rem)] w-full max-w-[860px] flex-col overflow-hidden rounded-[18px] border border-white/10 bg-black/60 shadow-2xl backdrop-blur-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-[24px]"
+        className="ios-sheet ios-settings settings-inner relative flex h-[680px] max-h-[calc(100dvh-1rem)] w-full max-w-[860px] flex-col overflow-hidden rounded-[18px] border border-white/10 bg-black/60 shadow-2xl backdrop-blur-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-[24px]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
@@ -426,7 +425,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 onClick={() => setTab(value)}
                 className={`w-auto shrink-0 whitespace-nowrap rounded-xl px-3 py-2.5 text-left text-sm sm:mb-1 sm:w-full ${
                   tab === value
-                    ? "bg-white/10 font-medium text-white"
+                    ? "bg-white/15 font-semibold text-white shadow-sm"
                     : "text-white/55 hover:bg-white/5 hover:text-white"
                 }`}
               >
@@ -843,99 +842,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   <p>本地音乐、网易云导入与 B 站视频声轨播放器。支持个人主页、喜欢、收藏、歌单与单曲品质偏好。</p>
                 </div>
 
-                {/* Update Check */}
-                <div className="rounded-2xl border border-white/5 bg-white/5 p-5">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
-                      <h4 className="font-semibold text-white text-sm">联网更新</h4>
-                      <p className="mt-1 text-xs text-white/40">检查并下载最新版本</p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        setUpdateStatus("checking");
-                        setUpdateInfo(null);
-                        try {
-                          const res = await fetch("https://api.github.com/repos/dujiandjdu-source/BiliMusic/releases/latest");
-                          if (!res.ok) {
-                            throw new Error(`GitHub returned ${res.status}`);
-                          }
-
-                          const data = (await res.json()) as {
-                            tag_name?: unknown;
-                            html_url?: unknown;
-                          };
-                          if (typeof data.tag_name !== "string") {
-                            throw new Error("Release version is missing");
-                          }
-
-                          const comparison = compareSemver(data.tag_name, __APP_VERSION__);
-                          if (comparison === null) {
-                            throw new Error("Release version is invalid");
-                          }
-
-                          if (comparison > 0) {
-                            const latestVer = data.tag_name.replace(/^[vV]/, "");
-                            setUpdateStatus("available");
-                            setUpdateInfo({
-                              version: latestVer,
-                              url:
-                                typeof data.html_url === "string"
-                                  ? data.html_url
-                                  : "https://github.com/dujiandjdu-source/BiliMusic/releases/latest",
-                            });
-                          } else {
-                            setUpdateStatus("up-to-date");
-                          }
-                        } catch {
-                          setUpdateStatus("error");
-                        }
-                      }}
-                      disabled={updateStatus === "checking"}
-                      className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-                        updateStatus === "checking"
-                          ? "bg-white/10 text-white/40 cursor-not-allowed"
-                          : "bg-pink-500/20 text-pink-200 hover:bg-pink-500/30"
-                      }`}
-                    >
-                      {updateStatus === "checking" ? "检查中…" : "检查更新"}
-                    </button>
-                  </div>
-
-                  {updateStatus === "checking" && (
-                    <div className="flex items-center gap-2 text-xs text-white/50">
-                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/20 border-t-pink-400"></span>
-                      正在连接到更新服务器…
-                    </div>
-                  )}
-
-                  {updateStatus === "available" && updateInfo && (
-                    <div className="rounded-xl border border-emerald-400/15 bg-emerald-500/10 p-3">
-                      <p className="text-sm text-emerald-200">发现新版本 v{updateInfo.version}</p>
-                      <button
-                        onClick={() => window.open(updateInfo.url, "_blank")}
-                        className="mt-2 rounded-lg bg-emerald-500/20 px-4 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/30"
-                      >
-                        前往下载
-                      </button>
-                    </div>
-                  )}
-
-                  {updateStatus === "up-to-date" && (
-                    <p className="text-xs text-emerald-200/70">已是最新版本</p>
-                  )}
-
-                  {updateStatus === "error" && (
-                    <div className="rounded-xl border border-red-400/15 bg-red-500/10 p-3">
-                      <p className="text-xs text-red-200">无法连接到更新服务器，请检查网络</p>
-                      <button
-                        onClick={() => setUpdateStatus("idle")}
-                        className="mt-2 text-xs text-red-200/60 hover:text-red-200"
-                      >
-                        重试
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <UpdateSettings />
 
                 {/* Cache Management */}
                 <div className="rounded-2xl border border-white/5 bg-white/5 p-5">

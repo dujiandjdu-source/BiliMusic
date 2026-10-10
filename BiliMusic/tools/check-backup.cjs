@@ -13,7 +13,8 @@ Object.defineProperty(app,'isPackaged',{get:()=>true});
 const RealWindow=electron.BrowserWindow;
 const shadow=Object.create(electron);Object.defineProperty(shadow,'BrowserWindow',{value:new Proxy(RealWindow,{construct(T,a){return new T({...a[0],show:false});}})});
 const Module=require('module'),original=Module._load;Module._load=function(n,...a){return n==='electron'?shadow:original.call(this,n,...a);};
-const {autoUpdater}=require(${JSON.stringify(path.join(root,'node_modules/electron-updater'))});autoUpdater.checkForUpdatesAndNotify=async()=>null;
+const {autoUpdater}=require(${JSON.stringify(path.join(root,'node_modules/electron-updater'))});autoUpdater.checkForUpdates=async()=>{autoUpdater.emit('update-not-available');return null;};
+const updateModule=require('module'),updateLoad=updateModule._load;updateModule._load=function(n,...a){return n==='electron-updater'?{autoUpdater}:updateLoad.call(this,n,...a);};
 app.whenReady().then(()=>electron.session.defaultSession.on('will-download',(_event,item)=>{
   item.setSavePath(${JSON.stringify(downloaded)});item.on('done',(_event,state)=>{global.backupDownloadState=state;});
 }));

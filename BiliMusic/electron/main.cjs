@@ -4,6 +4,7 @@ const path = require("path");
 let mainWindow;
 let browserView = null;
 let desktop;
+let browserChromeVisible = true;
 
 const BILIBILI_HOST_RE = /(^|\.)(bilibili|b23|hdslb)\.(com|tv)$|(^|\.)biliapi\.net$|(^|\.)bilivideo\.com$/i;
 const BILIBILI_URL = "https://www.bilibili.com/";
@@ -25,7 +26,9 @@ protocol.registerSchemesAsPrivileged([
 function getBounds() {
   if (!mainWindow) return { x: SIDEBAR_W, y: TOOLBAR_H, width: 1280 - SIDEBAR_W, height: 800 - TOOLBAR_H };
   const [w, h] = mainWindow.getSize();
-  return { x: SIDEBAR_W, y: TOOLBAR_H, width: w - SIDEBAR_W, height: h - TOOLBAR_H };
+  const left = browserChromeVisible ? SIDEBAR_W : 4;
+  const top = browserChromeVisible ? TOOLBAR_H : 4;
+  return { x: left, y: top, width: w - left, height: h - top };
 }
 
 function createBrowserView() {
@@ -71,7 +74,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800, minWidth: 900, minHeight: 600,
     title: "BiliMusic", backgroundColor: "#0b0c10",
-    frame: false, titleBarStyle: "hidden",
+    frame: false, thickFrame: false, titleBarStyle: "hidden",
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false },
   });
 
@@ -81,6 +84,25 @@ function createWindow() {
   mainWindow.on("close", (event) => {
     if (desktop?.shouldHideOnClose()) { event.preventDefault(); mainWindow.hide(); }
   });
+
+  // Native clipping also rounds BrowserView and portaled dialogs on Windows 10.
+  const updateWindowShape = () => {
+    if (process.platform !== 'win32' || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMaximized() || mainWindow.isFullScreen()) { mainWindow.setShape([]); return; }
+    const [width, height] = mainWindow.getSize();
+    const radius = 10;
+    const rects = [{ x: 0, y: radius, width, height: height - radius * 2 }];
+    for (let y = 0; y < radius; y++) {
+      const inset = Math.ceil(radius - Math.sqrt(radius * radius - (radius - y - 0.5) ** 2));
+      rects.push({ x: inset, y, width: width - inset * 2, height: 1 },
+        { x: inset, y: height - y - 1, width: width - inset * 2, height: 1 });
+    }
+    mainWindow.setShape(rects);
+  };
+  updateWindowShape();
+  for (const event of ['resize', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen']) {
+    mainWindow.on(event, updateWindowShape);
+  }
 
   ipcMain.handle("win:minimize", () => mainWindow.minimize());
   ipcMain.handle("win:maximize", () => { mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize(); });
@@ -95,6 +117,10 @@ function createWindow() {
   mainWindow.on("unmaximize", () => mainWindow.webContents.send("win:maximizeChange", false));
 
   ipcMain.handle("browser:show", () => { showBrowserView(); });
+  ipcMain.handle("browser:chrome", (_event, visible) => {
+    browserChromeVisible = visible !== false;
+    if (browserView && browserView.getBounds().width > 0) browserView.setBounds(getBounds());
+  });
   ipcMain.handle("browser:hide", () => { hideBrowserView(); });
   ipcMain.handle("browser:navigate", (_e, url) => { if (browserView && isHttp(url)) browserView.webContents.loadURL(url); });
   ipcMain.handle("browser:goBack", () => { if (browserView) browserView.webContents.goBack(); });
@@ -104,16 +130,7 @@ function createWindow() {
   ipcMain.handle("browser:getUrl", () => { if (!browserView) return BILIBILI_URL; try { return browserView.webContents.getURL() || BILIBILI_URL; } catch { return BILIBILI_URL; } });
 
   
-/* ---- 自动更新 ---- */
-// 启动后 5 秒自动检查，有更新弹原生通知
-setTimeout(() => {
-  autoUpdater.checkForUpdatesAndNotify();
-}, 5000);
-
-// 之后每 6 小时检查一次
-setInterval(() => {
-  autoUpdater.checkForUpdatesAndNotify();
-}, 6 * 60 * 60 * 1000);
+  require('./updater.cjs')({ app, updater: autoUpdater, ipcMain, getWindow: () => mainWindow, shell });
 
   app.isPackaged ? mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html")) : mainWindow.loadURL("http://localhost:3000");
 }

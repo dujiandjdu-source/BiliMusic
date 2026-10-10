@@ -124,21 +124,11 @@ const searchBiliForAudio = async (ses, keyword) => {
     const cid = infoData.data?.pages?.[0]?.cid || infoData.data?.cid;
     if (!cid) return null;
 
-    const playResult = await ses.fetch(
-      `${API_BASE}/x/player/playurl?bvid=${bvid}&cid=${cid}&fnval=4048&fourk=1`,
-      { headers: biliHeaders() }
-    );
-    const playData = await playResult.json();
-    if (playData.code !== 0) return null;
-
-    const dash = playData.data?.dash;
-    if (!dash?.audio?.length) return null;
-
-    const audio = dash.audio.sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))[0];
-    if (!audio?.baseUrl && !audio?.base_url) return null;
+    // Reuse the complete playback query and codec selection from Bilibili imports.
+    const audio = await require('./bilibili.js').getPlayableAudio(ses, bvid, cid, 'high');
 
     return {
-      url: audio.baseUrl || audio.base_url,
+      url: audio.remoteUrl,
       source: "bilibili",
       bvid,
       cid,
@@ -203,13 +193,24 @@ const streamAudio = (ses, request, remoteUrl, source) => {
 };
 
 // --- Custom protocol handler ---
+const parseAudioSongId = (value) => {
+  const url = new URL(value);
+  const parts = url.hostname.split('.');
+  const legacyId = parts.length === 4 && parts.every(part => /^\d+$/.test(part) && Number(part) <= 255)
+    ? String(parts.reduce((result, part) => result * 256 + Number(part), 0)) : url.hostname;
+  const songId = url.hostname === 'play' ? decodeURIComponent(url.pathname.slice(1)) : legacyId;
+  return /^\d{1,18}$/.test(songId) ? songId : null;
+};
 const registerNeteaseProtocol = (ses) => {
   const { protocol } = require("electron");
 
   protocol.handle("netease-audio", async (request) => {
     try {
       const url = new URL(request.url);
-      const songId = url.hostname;
+      // Standard Chromium schemes normalize a numeric hostname as an IPv4 address.
+      // Store IDs in the path; recover old numeric-host URLs for existing libraries.
+      const songId = parseAudioSongId(request.url);
+      if (!songId) return new Response('Invalid song ID', { status: 400 });
       const quality = url.searchParams.get("quality") || "standard";
       const cacheKey = `${songId}:${quality}`;
 
@@ -252,7 +253,7 @@ module.exports = function registerNetease(ipc, ses) {
 
   ipc.handle("netease:audio-url", async (_, songId, quality) => {
     return {
-      url: `netease-audio://${songId}?quality=${encodeURIComponent(quality || "standard")}`,
+      url: `netease-audio://play/${encodeURIComponent(songId)}?quality=${encodeURIComponent(quality || "standard")}`,
       code: 200,
       source: "pending",
     };
@@ -264,4 +265,4 @@ module.exports = function registerNetease(ipc, ses) {
   });
 };
 
-module.exports._test = { tryNeteaseAudio, searchBiliForAudio, setSongMeta, streamAudio };
+module.exports._test = { tryNeteaseAudio, searchBiliForAudio, setSongMeta, streamAudio, parseAudioSongId };

@@ -10,7 +10,7 @@ BiliMusic 是一款 Apple Music 风格的桌面音乐播放器，基于 Electron
 
 ### 下载
 
-从 [GitHub Releases](https://github.com/dujiandjdu-source/BiliMusic/releases) 下载最新版 `BiliMusic x.x.x.exe`（便携版，无需安装）。
+从 [GitHub Releases](https://github.com/dujiandjdu-source/BiliMusic/releases) 下载 `BiliMusic-Setup-x.x.x.exe`（推荐安装版，支持应用内更新）或 `BiliMusic-Portable-x.x.x.exe`（便携版，无需安装）。
 
 ### 系统要求
 
@@ -21,7 +21,9 @@ BiliMusic 是一款 Apple Music 风格的桌面音乐播放器，基于 Electron
 
 ## 启动
 
-双击 `BiliMusic x.x.x.exe` 即可启动。程序启动后会自动检查更新，有新版会弹出通知。
+运行安装版或双击便携版即可启动。启动后及每 6 小时自动检查更新；在「设置 → 关于 → 联网更新」查看状态，点击「下载更新」，下载完成后点击「退出并安装」。下载包由 electron-updater 校验 SHA-512，网络失败可重试或前往 GitHub 下载。
+
+便携版应用内更新会启动安装版安装程序，原便携文件会保留；安装版与便携版使用相同的用户数据目录，更新不会清除音乐库、歌单和设置。旧版缺少完整更新支持，需要先手动下载本次版本。
 
 ---
 

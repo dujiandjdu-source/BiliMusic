@@ -27,6 +27,13 @@ import { getAudioEngine } from './services/audioEngine';
 
 const App: React.FC = () => {
   const { toast } = useToast();
+  const notifiedUpdateRef = useRef('');
+  useEffect(() => window.electronAPI?.updater?.onState(state => {
+    if (state.status === 'available' && state.version && notifiedUpdateRef.current !== state.version) {
+      notifiedUpdateRef.current = state.version;
+      toast.success(`发现新版本 v${state.version}，可在设置 → 关于中下载更新`);
+    }
+  }), [toast]);
   const { dict } = useI18n();
   const playlist = usePlaylist();
   const player = usePlayer({
@@ -63,6 +70,9 @@ const App: React.FC = () => {
     isBuffering,
   } = player;
   const preferences = useMemo(() => normalizePreferences(playlist.library.preferences), [playlist.library.preferences]);
+  useEffect(() => {
+    if (player.playbackError) toast.error(player.playbackError);
+  }, [player.playbackError, toast]);
   const lyricsPreferencesKey = JSON.stringify(preferences.desktopLyrics);
   const shortcutPreferencesKey = JSON.stringify(preferences.shortcuts);
   const audioPreferencesKey = JSON.stringify(preferences.audio);
@@ -130,6 +140,10 @@ const App: React.FC = () => {
   const setSpeed = (speed: number) => playlist.updatePreferences({ ...preferences, audio: { ...preferences.audio, speed } });
   const togglePreservesPitch = () => playlist.updatePreferences({ ...preferences, audio: { ...preferences.audio, preservesPitch: !preferences.audio.preservesPitch } });
   const [appMode, setAppMode] = useState<"music" | "video">("music");
+  const [browserChromeVisible, setBrowserChromeVisible] = useState(true);
+  useEffect(() => {
+    void window.electronAPI?.browser?.setChromeVisible(appMode !== 'video' || browserChromeVisible);
+  }, [appMode, browserChromeVisible]);
 
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [activePanel, setActivePanel] = useState<"controls" | "lyrics">(
@@ -149,21 +163,30 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => window.electronAPI?.desktop?.onCommand((command) => {
+    if (typeof command === 'object') {
+      const index = playlist.queue.findIndex(song => song.id === command.songId);
+      if (index < 0) return;
+      if (command.action === 'play-song') playIndex(index);
+      if (command.action === 'like-song') playlist.toggleLiked(command.songId);
+      return;
+    }
     if (command === 'toggle') togglePlay();
     if (command === 'next') playNext();
     if (command === 'previous') playPrev();
     if (command === 'like' && currentSong) playlist.toggleLiked(currentSong.id);
     if (command === 'favorite' && currentSong) playlist.toggleFavorite(currentSong.id);
-  }), [togglePlay, playNext, playPrev, currentSong?.id, playlist.toggleLiked, playlist.toggleFavorite]);
+  }), [togglePlay, playNext, playPrev, playIndex, playlist.queue, currentSong?.id, playlist.toggleLiked, playlist.toggleFavorite]);
 
   useEffect(() => {
     void window.electronAPI?.desktop?.updateState({
+      songId: currentSong?.id,
+      queue: playlist.queue.map(song => ({ id: song.id, title: song.title, artist: song.artist, liked: playlist.library.likedSongIds.includes(song.id) })),
       title: currentSong?.title || 'BiliMusic', artist: currentSong?.artist || '选择一首歌曲',
       coverUrl: currentSong?.coverUrl, isPlaying: playState === PlayState.PLAYING,
       liked: Boolean(currentSong && playlist.library.likedSongIds.includes(currentSong.id)), currentTime, duration,
       ...activeDesktopLyric(currentSong, currentTime),
     });
-  }, [currentSong, playState, playlist.library.likedSongIds, currentTime, duration]);
+  }, [currentSong, playlist.queue, playState, playlist.library.likedSongIds, currentTime, duration]);
   const closePlaylist = useCallback(() => {
     setShowPlaylist(false);
   }, []);
@@ -488,7 +511,7 @@ const App: React.FC = () => {
   const mobileTranslate = baseOffset + dragOffsetX;
 
   return (
-    <div className="relative w-full h-screen flex flex-col overflow-hidden">
+    <div className="ios-app relative w-full h-screen flex flex-col overflow-hidden">
       <FluidBackground
         key={isMobileLayout ? "mobile" : "desktop"}
         colors={currentSong?.colors || []}
@@ -584,6 +607,8 @@ const App: React.FC = () => {
 
       {/* Top Bar */}
       <TopBar
+        videoChromeVisible={browserChromeVisible}
+        onRevealVideoChrome={() => setBrowserChromeVisible(true)}
         onFilesSelected={handleFileChange}
         appMode={appMode}
         onToggleMode={() => setAppMode((m) => (m === "music" ? "video" : "music"))}
@@ -610,7 +635,7 @@ const App: React.FC = () => {
 
       {/* Main Content Split */}
       {appMode === "video" ? (
-        <BilibiliWebView />
+        <BilibiliWebView chromeVisible={browserChromeVisible} onHideChrome={() => setBrowserChromeVisible(false)} onRevealChrome={() => setBrowserChromeVisible(true)} />
       ) : isMobileLayout ? (
         <div className="flex-1 relative w-full h-full">
           <div

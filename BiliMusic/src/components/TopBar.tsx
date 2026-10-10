@@ -3,6 +3,8 @@ import { SearchIcon, LocalMusicIcon, SettingsIcon } from "./Icons";
 import { useWindowDrag } from "../hooks/useWindowDrag";
 
 interface TopBarProps {
+  videoChromeVisible?: boolean;
+  onRevealVideoChrome?: () => void;
   onFilesSelected: (files: FileList) => void;
   onSearchClick: () => void;
   onSettingsClick: () => void;
@@ -10,7 +12,7 @@ interface TopBarProps {
   onToggleMode: () => void;
 }
 
-const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSettingsClick, appMode, onToggleMode }) => {
+const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSettingsClick, appMode, onToggleMode, videoChromeVisible = true, onRevealVideoChrome }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [hover, setHover] = useState(false);
@@ -18,7 +20,7 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
   const windowDrag = useWindowDrag();
 
   const isVideo = appMode === "video";
-  const showSidebar = hover || isVideo;
+  const showSidebar = isVideo ? videoChromeVisible : hover;
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -37,9 +39,10 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
   };
 
   const handleMouseEnter = useCallback(() => {
+    if (isVideo) onRevealVideoChrome?.();
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
     setHover(true);
-  }, []);
+  }, [isVideo, onRevealVideoChrome]);
 
   const handleMouseLeave = useCallback(() => {
     if (isVideo) return;
@@ -54,7 +57,7 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
     <>
       {/* 检测条 — 侧边栏显示时 pointer-events-none */}
       <div
-        className={`fixed top-0 left-0 bottom-0 w-12 z-[1000] ${showSidebar ? "pointer-events-none" : ""}`}
+        className={`fixed top-0 left-0 bottom-0 ${isVideo && !showSidebar ? 'w-1' : 'w-12'} z-[1000] ${showSidebar ? "pointer-events-none" : ""}`}
         onMouseEnter={handleMouseEnter}
       />
 
@@ -75,7 +78,7 @@ const TopBar: React.FC<TopBarProps> = ({ onFilesSelected, onSearchClick, onSetti
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        <div {...windowDrag} className="h-full w-full flex flex-col items-center py-3 gap-1 bg-black/60 backdrop-blur-xl border-r border-white/5 nodrag">
+        <div {...windowDrag} className="ios-sidebar h-full w-full flex flex-col items-center py-3 gap-1 bg-black/60 backdrop-blur-xl border-r border-white/5 nodrag">
           <div className="mb-2 text-white/50 text-[10px] font-medium tracking-widest nodrag" style={{ writingMode: "vertical-rl" }}>
             BiliMusic
           </div>

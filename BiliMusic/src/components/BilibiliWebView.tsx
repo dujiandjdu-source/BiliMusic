@@ -29,7 +29,7 @@ function faviconUrl(url: string): string {
   try { const u = new URL(url); return "https://www.google.com/s2/favicons?domain=" + u.hostname + "&sz=32"; } catch { return ""; }
 }
 
-const BilibiliWebView: React.FC = () => {
+const BilibiliWebView: React.FC<{ chromeVisible: boolean; onHideChrome: () => void; onRevealChrome: () => void }> = ({ chromeVisible, onHideChrome, onRevealChrome }) => {
   const urlInputRef = useRef<HTMLInputElement>(null);
   const [currentUrl, setCurrentUrl] = useState(BILIBILI_URL);
   const [urlInput, setUrlInput] = useState(BILIBILI_URL);
@@ -56,7 +56,9 @@ const BilibiliWebView: React.FC = () => {
 
   return (
     <div style={{ position: "fixed", top: 0, left: 48, width: "calc(100vw - 48px)", height: "100vh", zIndex: 20 }} className="flex flex-col bg-transparent pointer-events-none">
-      <div className="flex items-center gap-1.5 h-9 px-2 bg-[#0b0c10]/90 backdrop-blur-md border-b border-white/5 nodrag shrink-0 pointer-events-auto">
+      {!chromeVisible && <div aria-label="显示浏览工具栏" onMouseEnter={onRevealChrome} className="fixed top-0 left-0 right-0 h-1 pointer-events-auto" />}
+      <div className={`${chromeVisible ? 'flex' : 'hidden'} items-center gap-1.5 h-9 px-2 bg-[#0b0c10]/90 backdrop-blur-md border-b border-white/5 nodrag shrink-0 pointer-events-auto`}>
+        <button onClick={onHideChrome} title="隐藏侧栏和工具栏（移到窗口边缘恢复）" aria-label="隐藏浏览工具栏" className="w-7 h-7 flex items-center justify-center rounded text-white/50 hover:text-white hover:bg-white/8 shrink-0">⌃</button>
         <button onClick={navBack} disabled={!canGoBack} title="后退" className="w-7 h-7 flex items-center justify-center rounded text-white/50 hover:text-white/90 hover:bg-white/8 disabled:opacity-20 disabled:cursor-default transition"><BackIcon /></button>
         <button onClick={navFwd} disabled={!canGoForward} title="前进" className="w-7 h-7 flex items-center justify-center rounded text-white/50 hover:text-white/90 hover:bg-white/8 disabled:opacity-20 disabled:cursor-default transition"><ForwardIcon /></button>
         <button onClick={navReload} title="刷新" className="w-7 h-7 flex items-center justify-center rounded text-white/50 hover:text-white/90 hover:bg-white/8 transition"><ReloadIcon /></button>

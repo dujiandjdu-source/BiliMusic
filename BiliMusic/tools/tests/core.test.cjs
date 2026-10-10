@@ -23,6 +23,8 @@ test("shared factories preserve source names, part identity, optional covers and
   assert.equal(track.originalTitle, pages[0].part); assert.equal(track.needsLyricsMatch, true);
   const cloud = factory.createNeteaseSong({ id: "123", neteaseId: "123", title: "曲名", artist: "歌手", isNetease: true }, "lossless");
   assert.equal(cloud.coverUrl, undefined);
+  assert.equal(new URL(cloud.fileUrl).hostname, 'play');
+  assert.equal(new URL(cloud.fileUrl).pathname, '/123');
   assert.equal(new URL(cloud.fileUrl).searchParams.get("quality"), "lossless");
   const store = load("src/services/libraryStore.ts");
   const restored = store.fromStoredSong(store.toStoredSong(track));

@@ -35,8 +35,8 @@ module.exports = function setupDesktop(getMainWindow) {
   };
   function openMini() {
     if (!mini || mini.isDestroyed()) {
-      mini = new BrowserWindow({ width: 380, height: 160, minWidth: 340, minHeight: 160,
-        resizable: false, frame: false, alwaysOnTop: true, title: 'BiliMusic 迷你播放器', backgroundColor: '#171923',
+      mini = new BrowserWindow({ width: 360, height: 310, minWidth: 340, minHeight: 108,
+        resizable: false, frame: false, transparent: true, alwaysOnTop: true, title: 'BiliMusic 迷你播放器', backgroundColor: '#00000000',
         webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false },
       });
       mini.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -45,6 +45,7 @@ module.exports = function setupDesktop(getMainWindow) {
       else mini.loadURL('http://localhost:3000/?panel=mini');
     }
     mini.show();
+    main()?.hide();
     return true;
   }
   ipcMain.handle('desktop:mini', openMini);
@@ -52,6 +53,10 @@ module.exports = function setupDesktop(getMainWindow) {
   ipcMain.handle('desktop:update', (event, incoming) => {
     if (event.sender !== main()?.webContents || !incoming || typeof incoming !== 'object') return;
     state = {
+      songId: typeof incoming.songId === 'string' ? incoming.songId : '',
+      queue: Array.isArray(incoming.queue) ? incoming.queue.filter(song => song && typeof song.id === 'string' && typeof song.title === 'string').map(song => ({
+        id: song.id, title: song.title.slice(0, 500), artist: typeof song.artist === 'string' ? song.artist.slice(0, 500) : '', liked: song.liked === true,
+      })) : [],
       title: typeof incoming.title === 'string' ? incoming.title.slice(0, 500) : 'BiliMusic',
       artist: typeof incoming.artist === 'string' ? incoming.artist.slice(0, 500) : '',
       coverUrl: typeof incoming.coverUrl === 'string' ? incoming.coverUrl : '',
@@ -66,8 +71,24 @@ module.exports = function setupDesktop(getMainWindow) {
     updateMenu();
   });
   ipcMain.handle('desktop:command', (_event, command) => {
+    if (command && typeof command === 'object' && ['play-song', 'like-song'].includes(command.action) &&
+        typeof command.songId === 'string' && state.queue?.some(song => song.id === command.songId)) {
+      sendCommand({ action: command.action, songId: command.songId });
+      return;
+    }
     if (['toggle', 'previous', 'next', 'like', 'favorite'].includes(command)) sendCommand(command);
     if (command === 'restore') restore();
+  });
+  ipcMain.handle('desktop:mini-expanded', (event, expanded) => {
+    if (!mini || event.sender !== mini.webContents) return;
+    // Windows can retain the last fixed-size constraints after an expansion.
+    // Lift them while applying the next size, then restore the fixed window.
+    mini.setResizable(true);
+    try {
+      mini.setSize(360, expanded === true ? 310 : 108);
+    } finally {
+      mini.setResizable(false);
+    }
   });
   ipcMain.handle('desktop:topmost', (event, value) => {
     if (mini && event.sender === mini.webContents) mini.setAlwaysOnTop(value === true);

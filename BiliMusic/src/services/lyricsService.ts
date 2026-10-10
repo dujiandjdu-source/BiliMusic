@@ -339,7 +339,7 @@ const makeNeteaseProxyUrl = (id: string, quality = "standard") => {
 
 export const getNeteaseAudioUrl = (id: string, quality = "standard"): string => {
   if (typeof window !== "undefined" && window.electronAPI?.netease) {
-    return `netease-audio://${encodeURIComponent(id)}?quality=${encodeURIComponent(quality)}`;
+    return `netease-audio://play/${encodeURIComponent(id)}?quality=${encodeURIComponent(quality)}`;
   }
   return makeNeteaseProxyUrl(id, quality);
 };

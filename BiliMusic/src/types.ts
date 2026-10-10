@@ -113,6 +113,8 @@ export interface PlayHistoryEntry {
 export interface PlayEvent { songId: string; playedAt: number; }
 
 export interface DesktopPlayerState {
+  songId?: string;
+  queue?: Array<{ id: string; title: string; artist: string; liked: boolean }>;
   title: string;
   artist: string;
   coverUrl?: string;
@@ -124,7 +126,8 @@ export interface DesktopPlayerState {
   translation?: string;
 }
 
-export type DesktopCommand = 'toggle' | 'previous' | 'next' | 'like' | 'favorite' | 'restore';
+export type DesktopCommand = 'toggle' | 'previous' | 'next' | 'like' | 'favorite' | 'restore'
+  | { action: 'play-song' | 'like-song'; songId: string };
 
 export interface BilibiliLoginStatus {
   isLogin: boolean;

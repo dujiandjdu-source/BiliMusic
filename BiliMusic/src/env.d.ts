@@ -48,6 +48,14 @@ interface Window {
     openFileDialog: () => Promise<string[]>;
     storeGet: (key: string) => Promise<unknown>;
     storeSet: (key: string, value: unknown) => Promise<boolean>;
+    updater: {
+      getState: () => Promise<import('./components/UpdateSettings').UpdateState>;
+      check: () => Promise<import('./components/UpdateSettings').UpdateState>;
+      download: () => Promise<import('./components/UpdateSettings').UpdateState>;
+      install: () => Promise<import('./components/UpdateSettings').UpdateState>;
+      openRelease: () => Promise<void>;
+      onState: (callback: (state: import('./components/UpdateSettings').UpdateState) => void) => () => void;
+    };
     desktop: {
       openMini: () => Promise<boolean>;
       openLyrics: () => Promise<boolean>;
@@ -58,6 +66,7 @@ interface Window {
       configureShortcuts: (bindings: import('./types').AppPreferences['shortcuts']) => Promise<{success:boolean;error?:string}>;
       onLyricsPreferences: (callback: (preferences: import('./types').DesktopLyricsPreferences) => void) => () => void;
       getState: () => Promise<import('./types').DesktopPlayerState>;
+      setMiniExpanded: (value: boolean) => Promise<void>;
       updateState: (state: import('./types').DesktopPlayerState) => Promise<void>;
       command: (command: import('./types').DesktopCommand) => Promise<void>;
       setTopmost: (value: boolean) => Promise<boolean>;
@@ -113,6 +122,7 @@ interface Window {
       setMeta: (songId: string, title: string, artist: string) => Promise<boolean>;
     };
     browser: {
+      setChromeVisible: (visible: boolean) => Promise<void>;
       show: () => Promise<void>;
       hide: () => Promise<void>;
       navigate: (url: string) => Promise<void>;

@@ -848,7 +848,7 @@ const PlaylistPanel = React.memo(({
                     ref={panelRef}
                     style={{ ...style, height: PANEL_HEIGHT, maxHeight: "calc(100vh - 24px)" }}
                     className={`
-                        absolute bottom-full right-0 mb-4 z-50
+                        ios-sheet absolute bottom-full right-0 mb-4 z-50
                         w-[520px] max-w-[calc(100vw-24px)]
                         bg-black/10 backdrop-blur-[100px] saturate-150
                         rounded-[32px]

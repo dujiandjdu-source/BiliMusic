@@ -72,6 +72,7 @@ export const usePlayer = ({
   const [preservesPitch, setPreservesPitch] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
   const [bufferProgress, setBufferProgress] = useState(0);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const isSeekingRef = useRef(false);
   const poolRef = useRef<string[]>([]);
@@ -206,6 +207,10 @@ export const usePlayer = ({
       const songId = songRef.current;
 
       try {
+        setPlaybackError(null);
+        // A failed media element stays failed until load() creates a fresh request.
+        // Retry only on an explicit play action; never loop on unavailable tracks.
+        if (audio.error) audio.load();
         applyAudio();
         getAudioEngine(audio)?.resume();
         await audio.play();
@@ -223,6 +228,7 @@ export const usePlayer = ({
         cancelAudioTransition(audio);
         setPlayState(PlayState.PAUSED);
         playStateRef.current = PlayState.PAUSED;
+        setPlaybackError('歌曲播放失败，请检查网络或音源后重试');
         return false;
       }
     },
@@ -313,6 +319,7 @@ export const usePlayer = ({
 
   useEffect(() => {
     isSeekingRef.current = false;
+    setPlaybackError(null);
     setCurrentTime(0);
     setDuration(0);
   }, [currentSong?.id]);
@@ -717,6 +724,7 @@ export const usePlayer = ({
 
   // Error retry state — use ref so it persists across re-renders
   const errorRetryRef = useRef(0);
+  useEffect(() => { errorRetryRef.current = 0; }, [currentSong?.id]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -741,18 +749,24 @@ export const usePlayer = ({
         // Force reload without clearing src — avoids race with source resolution effect
         audio.load();
         if (playStateRef.current === PlayState.PLAYING) {
-          audio.play().catch(() => {});
+          void playAudioElement('Retry playback');
         }
         return;
       }
 
       // Exhausted retries or unrecoverable error
+      playRequestRef.current += 1;
+      cancelAudioTransition(audio);
       audio.pause();
       audio.currentTime = 0;
       setPlayState(PlayState.PAUSED);
       playStateRef.current = PlayState.PAUSED;
       setCurrentTime(0);
       setDuration(0);
+      setIsBuffering(false);
+      setPlaybackError(code === 2
+        ? '歌曲加载失败，请检查网络后点击播放重试'
+        : '音源不可用或格式不支持，请点击播放重试，或更换音源');
       errorRetryRef.current = 0;
     };
 
@@ -767,7 +781,7 @@ export const usePlayer = ({
       audio.removeEventListener("error", handleAudioError);
       audio.removeEventListener("canplay", handleCanPlay);
     };
-  }, [audioRef]);
+  }, [playAudioElement]);
 
   // Provide high-precision time updates directly from the native audio element
   useEffect(() => {
@@ -1004,5 +1018,6 @@ export const usePlayer = ({
     resolvedAudioSrc,
     isBuffering,
     bufferProgress,
+    playbackError,
   };
 };
