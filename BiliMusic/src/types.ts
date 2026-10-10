@@ -91,6 +91,17 @@ export type GlobalShortcutAction = 'toggle' | 'previous' | 'next' | 'favorite';
 export interface AppPreferences {
   desktopLyrics: DesktopLyricsPreferences;
   shortcuts: Record<GlobalShortcutAction, string>;
+  audio: AudioPreferences;
+}
+
+export interface AudioPreferences {
+  volume: number;
+  speed: number;
+  preservesPitch: boolean;
+  equalizerEnabled: boolean;
+  gains: number[];
+  normalization: boolean;
+  crossfadeSeconds: number;
 }
 
 export interface PlayHistoryEntry {

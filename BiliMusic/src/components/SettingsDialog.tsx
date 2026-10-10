@@ -14,6 +14,7 @@ import { clearResourceCaches } from "../services/cache";
 import { recentlyFrequentIds } from "../services/playHistory";
 import SmartImage from "./SmartImage";
 import PlaybackSettings, { type PlaybackSettingsProps } from './PlaybackSettings';
+import LibraryBackupSettings from './LibraryBackupSettings';
 
 type SettingsTab = "profile" | "account" | "songs" | "history" | "liked" | "favorites" | "playlists" | "playback" | "about";
 
@@ -104,6 +105,7 @@ interface SettingsDialogProps {
   onAddSongsToPlaylist: (playlistId: string, songIds: string[]) => void;
   onRemoveSongFromPlaylist: (playlistId: string, songId: string) => void;
   onImportLibrary: (library: Partial<MusicLibrary>) => void;
+  onBeforeRestore: () => void;
 }
 
 const SettingsDialog: React.FC<SettingsDialogProps> = ({
@@ -129,6 +131,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onAddSongsToPlaylist,
   onRemoveSongFromPlaylist,
   onImportLibrary,
+  onBeforeRestore,
 }) => {
   const [tab, setTab] = useState<SettingsTab>("profile");
   const [login, setLogin] = useState<BilibiliLoginStatus>({ isLogin: false });
@@ -693,6 +696,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
             {tab === "playlists" && (
               <div className="space-y-4">
+                <LibraryBackupSettings songs={songs} queue={queue} library={library} onBeforeRestore={onBeforeRestore} />
                 <section className="rounded-2xl border border-white/8 bg-white/5 p-4">
                   <h3 className="mb-3 font-semibold">创建歌单</h3>
                   <div className="grid gap-2 md:grid-cols-[1fr_150px_auto]">

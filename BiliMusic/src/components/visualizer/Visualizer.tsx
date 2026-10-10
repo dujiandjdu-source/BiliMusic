@@ -1,15 +1,12 @@
 import React, { useEffect, useRef } from "react";
 import { publishAudioLevel } from "@/services/audioLevelBridge";
 import audioProcessorUrl from "./AudioProcessor.ts?worker&url";
+import { getAudioEngine } from '../../services/audioEngine';
 
 interface VisualizerProps {
     audioRef: React.RefObject<HTMLAudioElement>;
     isPlaying: boolean;
 }
-
-// Global map to store source nodes to prevent "MediaElementAudioSourceNode" double-connection errors
-const sourceMap = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
-const contextMap = new WeakMap<HTMLAudioElement, AudioContext>();
 
 const BAR_COUNT = 96;
 const FFT_SIZE = 1024;
@@ -18,7 +15,6 @@ const BAR_GAP = 4;
 const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const workerRef = useRef<Worker | null>(null);
-    const audioContextRef = useRef<AudioContext | null>(null);
     const workletNodeRef = useRef<AudioWorkletNode | null>(null);
 
     // Effect 1: Audio Context and Worklet Initialization
@@ -29,56 +25,25 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
     }, [isPlaying]);
 
     useEffect(() => {
+        let active = true;
+        let tap: AudioWorkletNode | null = null;
+        let output: AudioNode | null = null;
         const initAudio = async () => {
             if (!audioRef.current) return;
-            const audioEl = audioRef.current;
-
-            let ctx = contextMap.get(audioEl);
-            if (!ctx) {
-                ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-                contextMap.set(audioEl, ctx);
-            }
-            audioContextRef.current = ctx;
-
-            if (ctx.state === "suspended" && isPlaying) {
-                await ctx.resume();
-            }
-
-            // Load AudioWorklet
-            if (!workletNodeRef.current) {
-                try {
-                    console.log("Visualizer: Loading AudioWorklet module...");
-                    // Load the module using a URL pointing to the JS file
-                    await ctx.audioWorklet.addModule(audioProcessorUrl);
-                    console.log("Visualizer: AudioWorklet module loaded successfully.");
-
-                    const workletNode = new AudioWorkletNode(ctx, "audio-processor");
-                    workletNode.port.onmessage = (e) => {
-                        if (e.data?.type === "LEVEL" && typeof e.data.level === "number") {
-                            publishAudioLevel(e.data.level);
-                        }
-                    };
-                    workletNodeRef.current = workletNode;
-                    console.log("Visualizer: AudioWorkletNode created.");
-
-                    // Connect Source -> Worklet -> Destination
-                    if (!sourceMap.has(audioEl)) {
-                        const source = ctx.createMediaElementSource(audioEl);
-                        source.connect(ctx.destination); // Output to speakers
-                        source.connect(workletNode);     // Output to visualizer
-                        sourceMap.set(audioEl, source);
-                    } else {
-                        const source = sourceMap.get(audioEl);
-                        if (source) {
-                            // Ensure connection
-                            try { source.connect(workletNode); } catch (e) { }
-                        }
-                    }
-
-                } catch (e) {
-                    console.error("Visualizer: Failed to load AudioWorklet", e);
-                }
-            }
+            const engine = getAudioEngine(audioRef.current);
+            if (!engine) return;
+            engine.resume();
+            try {
+                await engine.context.audioWorklet.addModule(audioProcessorUrl);
+                if (!active) return;
+                tap = new AudioWorkletNode(engine.context, "audio-processor");
+                tap.port.onmessage = (e) => {
+                    if (active && e.data?.type === "LEVEL" && typeof e.data.level === "number") publishAudioLevel(e.data.level);
+                };
+                workletNodeRef.current = tap;
+                output = engine.graph.output;
+                output.connect(tap);
+            } catch (e) { if (active) console.error("Visualizer: Failed to load AudioWorklet", e); }
         };
 
         if (isPlaying) {
@@ -86,12 +51,19 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
         }
 
         return () => {
-            // Cleanup logic if needed
+            active = false;
+            if (tap) {
+                output?.disconnect(tap);
+                tap.port.close(); tap.disconnect();
+                if (workletNodeRef.current === tap) workletNodeRef.current = null;
+            }
         };
     }, [isPlaying, audioRef]);
 
     // Effect 2: Worker Initialization
     useEffect(() => {
+        let active = true;
+        let frame = 0;
         if (!isPlaying) {
             if (workerRef.current) {
                 workerRef.current.postMessage({ type: "DESTROY" });
@@ -147,12 +119,13 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
             );
 
             const sendPortToWorklet = () => {
+                if (!active) return;
                 if (workletNodeRef.current) {
                     workletNodeRef.current.port.postMessage({ type: "PORT", port: channel.port2 }, [
                         channel.port2
                     ]);
                 } else {
-                    requestAnimationFrame(sendPortToWorklet);
+                    frame = requestAnimationFrame(sendPortToWorklet);
                 }
             };
             sendPortToWorklet();
@@ -161,6 +134,8 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
         }
 
         return () => {
+            active = false;
+            cancelAnimationFrame(frame);
             if (workerRef.current) {
                 workerRef.current.postMessage({ type: "DESTROY" });
                 workerRef.current.terminate();

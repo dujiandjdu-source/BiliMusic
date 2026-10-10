@@ -548,6 +548,7 @@ const Controls: React.FC<ControlsProps> = ({
 
         <button
           onClick={onPlayPause}
+          aria-label={dict.keys.playPause}
           className="relative flex items-center justify-center p-3 hover:bg-white/10 rounded-full active:bg-white/20 transition-all outline-none transform active:scale-95 text-white"
         >
           <div className="relative w-10 h-10 flex items-center justify-center">

@@ -212,16 +212,23 @@ require(${JSON.stringify(path.join(appDirectory,'electron/main.cjs'))});
     await page.locator('div.z-\\[1000\\]').dispatchEvent('mouseover');await page.waitForTimeout(250);
     await page.locator('button[title="设置"]').first().click();await page.getByRole('button',{name:'播放设置',exact:true}).click();
     const hotkey='Control+Alt+Shift+F10';
+    // Leave the user's running player alone; reserve only this test's unique binding.
+    for (const action of ['上一首','下一首','收藏 / 取消收藏']) {
+      await page.getByLabel('全局快捷键 '+action,{exact:true}).fill('');
+    }
     await page.getByLabel('全局快捷键 播放 / 暂停',{exact:true}).fill(hotkey);
     await page.getByRole('button',{name:'应用快捷键',exact:true}).click();
     await page.waitForTimeout(300);
-    assert.equal(await electron.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),hotkey),true);
+    assert.equal(await electron.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),hotkey),true,
+      JSON.stringify({ input: await page.getByLabel('全局快捷键 播放 / 暂停',{exact:true}).inputValue(),
+        saved: (await readSnapshot()).library.preferences.shortcuts, notices: await page.locator('[role="status"]').allTextContents() }));
     const occupied='Control+Alt+Shift+F9';
     assert.equal(await electron.evaluate(({globalShortcut},key)=>globalShortcut.register(key,()=>{}),occupied),true);
     await page.getByLabel('全局快捷键 播放 / 暂停',{exact:true}).fill(occupied);
     await page.getByRole('button',{name:'应用快捷键',exact:true}).click();
-    await page.getByText(/快捷键被占用或无效/).waitFor();await page.waitForTimeout(250);
-    assert.equal(await page.getByText(/快捷键被占用或无效/).count(),1,'conflict creates one error notice without rerender loops');
+    const conflictNotice = page.getByText(/快捷键被占用或无效：Control\+Alt\+Shift\+F9/);
+    await conflictNotice.waitFor();await page.waitForTimeout(250);
+    assert.equal(await conflictNotice.count(),1,'conflict creates one error notice without rerender loops');
     assert.equal((await readSnapshot()).library.preferences.shortcuts.toggle,hotkey,'conflict does not persist rejected settings');
     assert.equal(await electron.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),hotkey),true);
     await electron.evaluate(({globalShortcut},key)=>globalShortcut.unregister(key),occupied);

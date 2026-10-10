@@ -19,6 +19,7 @@ import {
   MatchedLyricsResult,
 } from "../services/lyricsService";
 import { sameSong, uniqueSongsAgainst } from "../services/songIdentity";
+import { cancelAudioTransition, getAudioEngine, prepareAudioTransition, stopAudioEngine } from '../services/audioEngine';
 
 type MatchStatus = "idle" | "matching" | "success" | "failed";
 
@@ -79,6 +80,9 @@ export const usePlayer = ({
   const playVisitRef = useRef(0);
   const countedVisitRef = useRef(-1);
   const lyricsRequestRef = useRef(0);
+  const advanceRef = useRef({ enabled: false, next: () => {} });
+  const fadedVisitRef = useRef(-1);
+  const previousIdsRef = useRef<string[]>([]);
 
   // Keep playStateRef in sync with playState
   useEffect(() => {
@@ -102,6 +106,7 @@ export const usePlayer = ({
     playVisitRef.current += 1;
     playRequestRef.current += 1;
     if (!audioRef.current) return;
+    prepareAudioTransition(audioRef.current);
     audioRef.current.pause();
     audioRef.current.currentTime = 0;
   }, []);
@@ -202,6 +207,7 @@ export const usePlayer = ({
 
       try {
         applyAudio();
+        getAudioEngine(audio)?.resume();
         await audio.play();
         if (request !== playRequestRef.current || source !== audio.src || songId !== songRef.current || audio.paused) return false;
         setPlayState(PlayState.PLAYING);
@@ -214,6 +220,7 @@ export const usePlayer = ({
           return false;
         }
         console.error(`${reason} failed`, err);
+        cancelAudioTransition(audio);
         setPlayState(PlayState.PAUSED);
         playStateRef.current = PlayState.PAUSED;
         return false;
@@ -225,6 +232,7 @@ export const usePlayer = ({
   const togglePlay = useCallback(() => {
     if (!audioRef.current) return;
     if (playState === PlayState.PLAYING) {
+      stopAudioEngine(audioRef.current);
       playRequestRef.current += 1;
       audioRef.current.pause();
       playStateRef.current = PlayState.PAUSED;
@@ -247,6 +255,7 @@ export const usePlayer = ({
 
   const pause = useCallback(() => {
     if (!audioRef.current) return;
+    stopAudioEngine(audioRef.current);
     playRequestRef.current += 1;
     audioRef.current.pause();
     playStateRef.current = PlayState.PAUSED;
@@ -267,6 +276,7 @@ export const usePlayer = ({
         setCurrentTime(time);
       } else {
         // Actually perform the seek
+        cancelAudioTransition(audioRef.current);
         audioRef.current.currentTime = time;
         setCurrentTime(time);
         isSeekingRef.current = false;
@@ -278,10 +288,18 @@ export const usePlayer = ({
     [playAudioElement],
   );
 
-  const handleTimeUpdate = useCallback(() => {
+  const handleTimeUpdate = useCallback((allowCrossfade = false) => {
     if (!audioRef.current || isSeekingRef.current) return;
     const value = audioRef.current.currentTime;
     setCurrentTime(Number.isFinite(value) ? value : 0);
+    const audio = audioRef.current;
+    const seconds = getAudioEngine(audio)?.graph.settings.crossfadeSeconds ?? 0;
+    if (allowCrossfade && seconds > 0 && advanceRef.current.enabled && !audio.paused &&
+        Number.isFinite(audio.duration) && audio.duration > seconds * 2 &&
+        audio.duration - value > 0 && audio.duration - value <= seconds && fadedVisitRef.current !== playVisitRef.current) {
+      fadedVisitRef.current = playVisitRef.current;
+      advanceRef.current.next();
+    }
   }, []);
 
   const handleLoadedMetadata = useCallback(() => {
@@ -440,6 +458,14 @@ export const usePlayer = ({
     playAudioElement,
   ]);
 
+  advanceRef.current = { enabled: queue.length > 1 && playMode !== PlayMode.LOOP_ONE, next: playNext };
+  useEffect(() => {
+    const ids = new Set(queue.map(song => song.id));
+    if (previousIdsRef.current.some(id => !ids.has(id))) cancelAudioTransition(audioRef.current);
+    previousIdsRef.current = [...ids];
+  }, [idsKey]);
+  useEffect(() => () => stopAudioEngine(audioRef.current), []);
+
   const playIndex = useCallback(
     (index: number) => {
       if (index < 0 || index >= queue.length) return;
@@ -491,6 +517,7 @@ export const usePlayer = ({
 
   const addSongAndPlay = useCallback(
     (song: Song) => {
+      pauseAndResetCurrentAudio();
       if (playMode === PlayMode.SHUFFLE && currentSong?.id && currentSong.id !== song.id) {
         pastRef.current.push(currentSong.id);
       }
@@ -502,11 +529,13 @@ export const usePlayer = ({
       setIndex(next.findIndex((item) => item.id === selected.id), next);
       setPlayState(PlayState.PLAYING);
       setMatchStatus("idle");
+      if (selected.id === currentSong?.id && selected.fileUrl === currentSong.fileUrl) void playAudioElement('Replay library song');
     },
-    [playMode, currentSong?.id, queue, setIndex, setQueue],
+    [playMode, currentSong?.id, currentSong?.fileUrl, queue, setIndex, setQueue, pauseAndResetCurrentAudio, playAudioElement],
   );
 
   const handleAudioPlaying = useCallback(() => {
+    if (audioRef.current) getAudioEngine(audioRef.current)?.onPlaying();
     if (!songRef.current || audioRef.current?.paused || countedVisitRef.current === playVisitRef.current) return;
     countedVisitRef.current = playVisitRef.current;
     onSongPlayed?.(songRef.current);
@@ -822,6 +851,7 @@ export const usePlayer = ({
 
   useEffect(() => {
     if (queue.length === 0) {
+      stopAudioEngine(audioRef.current);
       if (currentIndex === -1) return;
       audioRef.current?.pause();
       if (audioRef.current) audioRef.current.currentTime = 0;
@@ -855,10 +885,12 @@ export const usePlayer = ({
   }, [queue, currentIndex, setIndex]);
 
   const handleSetSpeed = useCallback((newSpeed: number) => {
+    cancelAudioTransition(audioRef.current);
     setSpeed(newSpeed);
   }, []);
 
   const handleTogglePreservesPitch = useCallback(() => {
+    cancelAudioTransition(audioRef.current);
     setPreservesPitch((prev) => !prev);
   }, []);
 

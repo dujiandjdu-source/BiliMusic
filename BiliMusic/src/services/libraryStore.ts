@@ -293,21 +293,27 @@ export const buildLibrarySnapshot = (
   };
 };
 
-let pendingSnapshotSave: Promise<unknown> = Promise.resolve();
+let pendingLibraryWrite: Promise<unknown> = Promise.resolve();
+let backupRestoreInProgress = false;
+
+const enqueueLibraryWrite = <T>(write: () => Promise<T>): Promise<T> => {
+  const result = pendingLibraryWrite.then(write);
+  pendingLibraryWrite = result.catch(() => {});
+  return result;
+};
 
 export const saveLibrarySnapshot = async (
   queue: Song[],
   library?: MusicLibrary,
   songs?: Song[],
 ) => {
+  if (backupRestoreInProgress) return;
   const snap = buildLibrarySnapshot(queue, library, songs);
 
-  const save = pendingSnapshotSave.then(() => runDb([META], "readwrite", async (tx) => {
+  await enqueueLibraryWrite(() => runDb([META], "readwrite", async (tx) => {
       await waitReq(tx.objectStore(META).put(snap, SNAP));
       return undefined;
     }));
-  pendingSnapshotSave = save.catch(() => {});
-  await save;
 };
 
 export const parseLibrarySnapshot = (raw: unknown): LibrarySnapshot | null => {
@@ -380,15 +386,16 @@ export const loadLibrarySnapshot = async (): Promise<LibrarySnapshot | null> => 
 };
 
 export const saveLocalFiles = async (list: Array<{ id: string; file: Blob }>) => {
+  if (backupRestoreInProgress) throw new Error("正在恢复备份，请稍后导入");
   if (list.length === 0) {
     return;
   }
 
-  const result = await runDb([FILES], "readwrite", async (tx) => {
+  const result = await enqueueLibraryWrite(() => runDb([FILES], "readwrite", async (tx) => {
     const store = tx.objectStore(FILES);
     await Promise.all(list.map((item) => waitReq(store.put(item.file, item.id))));
     return undefined;
-  });
+  }));
   if (result === null) throw new Error("本地音乐存储不可用");
 };
 
@@ -402,15 +409,45 @@ export const loadLocalFile = async (id: string): Promise<Blob | null> => {
 };
 
 export const deleteLocalFiles = async (ids: string[]) => {
+  if (backupRestoreInProgress) return;
   if (ids.length === 0) {
     return;
   }
 
-  await runDb([FILES], "readwrite", async (tx) => {
+  await enqueueLibraryWrite(() => runDb([FILES], "readwrite", async (tx) => {
     const store = tx.objectStore(FILES);
     await Promise.all(ids.map((id) => waitReq(store.delete(id))));
     return undefined;
-  });
+  }));
+};
+
+/** Commit metadata and owned audio together. Keep old files until explicitly deleted.
+ * After success the caller must reload immediately; stale renderer saves stay blocked.
+ */
+export const restoreLibraryBackup = async (
+  snapshot: LibrarySnapshot,
+  files: Array<{ id: string; file: Blob }>,
+): Promise<void> => {
+  if (backupRestoreInProgress) throw new Error("备份恢复已在进行中");
+  backupRestoreInProgress = true;
+  try {
+    // Include queued audio saves/deletions, not only metadata snapshots.
+    await pendingLibraryWrite;
+    const result = await runDb([META, FILES], "readwrite", async (tx) => {
+      try {
+        const requests = files.map(({ id, file }) => waitReq(tx.objectStore(FILES).put(file, id)));
+        requests.push(waitReq(tx.objectStore(META).put(snapshot, SNAP)));
+        await Promise.all(requests);
+      } catch (error) {
+        try { tx.abort(); } catch { /* Already aborted by IndexedDB. */ }
+        throw error;
+      }
+    });
+    if (result === null) throw new Error("本地音乐存储不可用");
+  } catch (error) {
+    backupRestoreInProgress = false;
+    throw error;
+  }
 };
 
 export const hydrateLibrarySnapshot = async (

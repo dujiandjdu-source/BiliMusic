@@ -1,7 +1,9 @@
 import type { AppPreferences, DesktopLyricsPreferences, GlobalShortcutAction } from '../types';
+import { defaultAudioPreferences, normalizeAudioPreferences } from './audioSettings';
 
 export const SHORTCUT_ACTIONS: GlobalShortcutAction[] = ['toggle', 'previous', 'next', 'favorite'];
 export const defaultPreferences = (): AppPreferences => ({
+  audio: defaultAudioPreferences(),
   desktopLyrics: { topmost: true, locked: false, clickThrough: false, fontSize: 30,
     fontFamily: 'Microsoft YaHei', color: '#ffffff', translationColor: '#f9a8d4' },
   shortcuts: { toggle: 'CommandOrControl+Alt+Space', previous: 'CommandOrControl+Alt+Left',
@@ -27,5 +29,6 @@ export const normalizePreferences = (input?: Partial<AppPreferences>): AppPrefer
     const value = input?.shortcuts?.[action];
     if (typeof value === 'string' && value.length < 120) base.shortcuts[action] = value.trim();
   }
-  return { desktopLyrics: normalizeDesktopLyrics(input?.desktopLyrics), shortcuts: base.shortcuts };
+  return { desktopLyrics: normalizeDesktopLyrics(input?.desktopLyrics), shortcuts: base.shortcuts,
+    audio: normalizeAudioPreferences(input?.audio) };
 };

@@ -3,6 +3,7 @@ import type { AppPreferences, Song } from '../types';
 import { defaultPreferences, normalizePreferences, SHORTCUT_ACTIONS } from '../services/preferences';
 import { searchNetEase, type NeteaseTrackInfo } from '../services/lyricsService';
 import type { SleepTimerState } from '../services/sleepTimer';
+import { defaultAudioPreferences, EQ_FREQUENCIES } from '../services/audioSettings';
 
 export interface PlaybackSettingsProps {
   song: Song | null;
@@ -53,6 +54,24 @@ export default function PlaybackSettings(props: PlaybackSettingsProps) {
   };
   const labels = { toggle: '播放 / 暂停', previous: '上一首', next: '下一首', favorite: '收藏 / 取消收藏' };
   return <div className="space-y-4">
+    <section className={sectionClass}>
+      <h3 className="font-semibold">音频体验</h3>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label="启用均衡器" checked={preferences.audio.equalizerEnabled}
+        onChange={e=>onPreferences({...preferences,audio:{...preferences.audio,equalizerEnabled:e.target.checked}})} />启用均衡器</label>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {EQ_FREQUENCIES.map((frequency,index)=><label key={frequency} className="text-xs text-white/60">{frequency >= 1000 ? `${frequency / 1000} kHz` : `${frequency} Hz`} · {preferences.audio.gains[index]} dB
+          <input className="mt-2 block w-full" aria-label={`均衡器 ${frequency} Hz`} type="range" min={-12} max={12} step={1} disabled={!preferences.audio.equalizerEnabled} value={preferences.audio.gains[index]}
+            onChange={e=>onPreferences({...preferences,audio:{...preferences.audio,gains:preferences.audio.gains.map((value,i)=>i===index?Number(e.target.value):value)}})} />
+        </label>)}
+      </div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label="实时音量均衡" checked={preferences.audio.normalization}
+        onChange={e=>onPreferences({...preferences,audio:{...preferences.audio,normalization:e.target.checked}})} />实时音量均衡</label>
+      <p className="text-xs text-white/40">根据播放信号平滑调整响度，静音段不增益，限制最大放大并保护峰值。均衡器提升频段时自动留出音量余量。</p>
+      <label className="flex items-center gap-3 text-sm">切歌淡入淡出（秒）<input aria-label="切歌淡入淡出秒数" type="number" className={inputClass+' w-20'} min={0} max={8} step={0.5} value={preferences.audio.crossfadeSeconds}
+        onChange={e=>onPreferences({...preferences,audio:{...preferences.audio,crossfadeSeconds:Number(e.target.value)}})} /></label>
+      <p className="text-xs text-white/40">0 为关闭。自动衔接适用于多曲队列；定时停止开启时，保留当前歌曲的完整播放时间。</p>
+      <button className={inputClass} onClick={()=>onPreferences({...preferences,audio:defaultAudioPreferences()})}>重置音频设置</button>
+    </section>
     <section className={sectionClass}>
       <h3 className="font-semibold">歌词校准</h3>
       <p className="text-sm text-white/60">{song ? `${song.title} · ${song.artist}` : '先选择一首歌曲'}</p>

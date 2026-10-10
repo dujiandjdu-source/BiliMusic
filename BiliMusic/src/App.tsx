@@ -23,6 +23,7 @@ import { sameSong } from "./services/songIdentity";
 import { normalizePreferences } from './services/preferences';
 import { activeDesktopLyric, calibrateLyrics, normalizeLyricsOffset } from './services/lyricCalibration';
 import { useSleepTimer } from './hooks/useSleepTimer';
+import { getAudioEngine } from './services/audioEngine';
 
 const App: React.FC = () => {
   const { toast } = useToast();
@@ -64,6 +65,11 @@ const App: React.FC = () => {
   const preferences = useMemo(() => normalizePreferences(playlist.library.preferences), [playlist.library.preferences]);
   const lyricsPreferencesKey = JSON.stringify(preferences.desktopLyrics);
   const shortcutPreferencesKey = JSON.stringify(preferences.shortcuts);
+  const audioPreferencesKey = JSON.stringify(preferences.audio);
+  useEffect(() => {
+    if (!playlist.isReady || !audioRef.current) return;
+    getAudioEngine(audioRef.current)?.configure(JSON.parse(audioPreferencesKey));
+  }, [playlist.isReady, audioPreferencesKey, audioRef]);
   const preferencesRequestRef = useRef(0);
   const sleep = useSleepTimer(pause, currentSong?.id);
   const displayLyrics = useMemo(() => calibrateLyrics(currentSong?.lyrics ?? [], currentSong?.lyricsOffset ?? 0),
@@ -110,7 +116,19 @@ const App: React.FC = () => {
   const [biliVideo, setBiliVideo] = useState<BilibiliVideoInfo | null>(null);
   const [showVolumePopup, setShowVolumePopup] = useState(false);
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
-  const [volume, setVolume] = useState(1);
+  const volume = preferences.audio.volume;
+  const setVolume = useCallback((volume: number) => {
+    playlist.updatePreferences({ ...preferences, audio: { ...preferences.audio, volume } });
+  }, [preferences, playlist.updatePreferences]);
+  useEffect(() => {
+    if (!playlist.isReady) return;
+    player.setSpeed(preferences.audio.speed);
+  }, [playlist.isReady, preferences.audio.speed, player.setSpeed]);
+  useEffect(() => {
+    if (playlist.isReady && player.preservesPitch !== preferences.audio.preservesPitch) player.togglePreservesPitch();
+  }, [playlist.isReady, preferences.audio.preservesPitch, player.preservesPitch, player.togglePreservesPitch]);
+  const setSpeed = (speed: number) => playlist.updatePreferences({ ...preferences, audio: { ...preferences.audio, speed } });
+  const togglePreservesPitch = () => playlist.updatePreferences({ ...preferences, audio: { ...preferences.audio, preservesPitch: !preferences.audio.preservesPitch } });
   const [appMode, setAppMode] = useState<"music" | "video">("music");
 
   const [isMobileLayout, setIsMobileLayout] = useState(false);
@@ -414,8 +432,8 @@ const App: React.FC = () => {
           onVolumeChange={setVolume}
           speed={player.speed}
           preservesPitch={player.preservesPitch}
-          onSpeedChange={player.setSpeed}
-          onTogglePreservesPitch={player.togglePreservesPitch}
+          onSpeedChange={setSpeed}
+          onTogglePreservesPitch={togglePreservesPitch}
           coverUrl={currentSong?.coverUrl}
           isBuffering={isBuffering}
           showVolumePopup={showVolumePopup}
@@ -482,7 +500,7 @@ const App: React.FC = () => {
       <audio
         ref={audioRef}
         src={currentSong?.fileUrl}
-        onTimeUpdate={handleTimeUpdate}
+        onTimeUpdate={() => handleTimeUpdate(sleep.state.mode === 'off')}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={() => handleAudioEnded(sleep.timer.consumeEnded(currentSong?.id))}
         onPlaying={player.handleAudioPlaying}
@@ -502,7 +520,7 @@ const App: React.FC = () => {
         onToggleMode={toggleMode}
         onTogglePlaylist={togglePlaylist}
         speed={player.speed}
-        onSpeedChange={player.setSpeed}
+        onSpeedChange={setSpeed}
         onToggleVolumeDialog={() => setShowVolumePopup((prev) => !prev)}
         onToggleSpeedDialog={() => setShowSettingsPopup((prev) => !prev)}
       />
@@ -554,6 +572,7 @@ const App: React.FC = () => {
         onAddSongsToPlaylist={playlist.addSongsToPlaylist}
         onRemoveSongFromPlaylist={playlist.removeSongFromPlaylist}
         onImportLibrary={playlist.importLibrary}
+        onBeforeRestore={() => { pause(); sleep.timer.cancel(); }}
       />
 
       <BilibiliVideoDialog
