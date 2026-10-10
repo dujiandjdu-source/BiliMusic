@@ -37,6 +37,7 @@ const TestWindow=new Proxy(RealWindow,{construct(Target,args){return new Target(
 const shadow=Object.create(electron);Object.defineProperty(shadow,'BrowserWindow',{value:TestWindow});
 const Module=require('module'),original=Module._load;Module._load=function(n,...a){return n==='electron'?shadow:original.call(this,n,...a);};
 const {autoUpdater}=require(${JSON.stringify(path.join(root,'node_modules/electron-updater'))});
+Object.defineProperty(autoUpdater.app,'baseCachePath',{get:()=>${JSON.stringify(cache)}});
 const loadWithElectron=Module._load;Module._load=function(n,...a){return n==='electron-updater'?{autoUpdater}:loadWithElectron.call(this,n,...a);};
 autoUpdater.updateConfigPath=${JSON.stringify(path.join(path.dirname(appPath), 'app-update.yml'))};
 autoUpdater.disableDifferentialDownload=true;
